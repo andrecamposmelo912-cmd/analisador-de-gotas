@@ -235,6 +235,7 @@ if arquivos_enviados:
                     st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
 
     # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
+ # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
     with aba_relatorio:
         st.subheader("📋 Laudo de Campo e Recomendações de Pulverização")
         cartao_relatorio = st.selectbox("Selecione o cartão para gerar o Laudo:", list(dados_graficos.keys()), key="rel_select")
@@ -261,8 +262,9 @@ if arquivos_enviados:
             recom_deriva = "Se o Risco de Deriva está alto, reduza ligeiramente a pressão de trabalho ou utilize pontas com indução de ar." if deriva_atual > 30 else "Parabéns, os níveis de deriva estão baixos. Mantenha os parâmetros operacionais."
             recom_densidade = "Sua densidade está baixa. Considere aumentar a taxa de aplicação ou usar bicos que quebrem mais o espectro, se o clima permitir." if densidade_atual < 60 else "Densidade excelente! Garante ótima cobertura e translocação do produto na folha."
 
+            # O segredo está no fechamento da f-string e no parâmetro unsafe_allow_html=True no final!
             st.markdown(f"""
-            <div style="border:2px solid #1f77b4; padding:25px; border-radius:10px; background-color:#fafafa;">
+            <div style="border:2px solid #1f77b4; padding:25px; border-radius:10px; background-color:#fafafa; font-family:sans-serif;">
                 <h2 style="color:#1f77b4; margin-top:0;">LAUDO DE AVALIAÇÃO DA QUALIDADE DE APLICAÇÃO</h2>
                 <p><strong>Identificação da Amostra:</strong> {cartao_relatorio} | <strong>Status do Sistema:</strong> Análise Concluída</p>
                 <hr style="border:1px solid #1f77b4;">
@@ -270,34 +272,34 @@ if arquivos_enviados:
                 <h3 style="color:#333;">1. Diagnóstico do Espectro de Gotas</h3>
                 <table style="width:100%; border-collapse: collapse; margin-bottom:20px;">
                     <tr style="background-color:#eaeaea; text-align:left;">
-                        <th style="padding:8px; border:1px solid #ddd;">Parâmetro Analisado</th>
-                        <th style="padding:8px; border:1px solid #ddd;">Valor Lido</th>
-                        <th style="padding:8px; border:1px solid #ddd;">Interpretação Prática para o Campo</th>
+                        <th style="padding:12px; border:1px solid #ddd;">Parâmetro Analisado</th>
+                        <th style="padding:12px; border:1px solid #ddd;">Valor Lido</th>
+                        <th style="padding:12px; border:1px solid #ddd;">Interpretação Prática para o Campo</th>
                     </tr>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;"><strong>DMV (Diâmetro Mediano)</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd; font-size:16px; color:#0056b3;"><strong>{dmv_atual} µm</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">Classe de Gotas: <strong>{classificação_gota}</strong></td>
+                    <tr style="background-color:#fff;">
+                        <td style="padding:12px; border:1px solid #ddd;"><strong>DMV (Diâmetro Mediano)</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd; font-size:16px; color:#0056b3;"><strong>{dmv_atual} µm</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd;">Classe de Gotas: <strong>{classificação_gota}</strong></td>
                     </tr>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;"><strong>Densidade de Gotas</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{densidade_atual} gotas/cm²</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{txt_densidade}</td>
+                    <tr style="background-color:#f9f9f9;">
+                        <td style="padding:12px; border:1px solid #ddd;"><strong>Densidade de Gotas</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{densidade_atual} gotas/cm²</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd;">{txt_densidade}</td>
                     </tr>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;"><strong>Potencial de Deriva</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd; font-size:16px; color:#d62728;"><strong>{deriva_atual}%</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{txt_deriva}</td>
+                    <tr style="background-color:#fff;">
+                        <td style="padding:12px; border:1px solid #ddd;"><strong>Potencial de Deriva</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd; font-size:16px; color:#d62728;"><strong>{deriva_atual}%</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd;">{txt_deriva}</td>
                     </tr>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;"><strong>Uniformidade (SPAN)</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{span_atual}</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{txt_span}</td>
+                    <tr style="background-color:#f9f9f9;">
+                        <td style="padding:12px; border:1px solid #ddd;"><strong>Uniformidade (SPAN)</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{span_atual}</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd;">{txt_span}</td>
                     </tr>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;"><strong>Cobertura Real</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{cobertura_atual}%</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">Porcentagem da área útil do cartão que recebeu a calda.</td>
+                    <tr style="background-color:#fff;">
+                        <td style="padding:12px; border:1px solid #ddd;"><strong>Cobertura Real</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{cobertura_atual}%</strong></td>
+                        <td style="padding:12px; border:1px solid #ddd;">Porcentagem da área útil do cartão que recebeu a calda.</td>
                     </tr>
                 </table>
                 
