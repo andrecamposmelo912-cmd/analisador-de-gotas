@@ -34,7 +34,9 @@ img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 # 🔐 TELA DE LOGIN CENTRALIZADA E PROPORCIONAL
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
-    "andre": "agro2026",      
+    "andre": "iaciac",
+    "manoel": "iaciac",
+    "hamilton": "iaciac",
     "iac": "apliquebem2026"  
 }
 
@@ -277,19 +279,12 @@ if arquivo_enviado:
         col_dash1, col_dash2, col_dash3, col_dash4 = st.columns(4)
         with col_dash1:
             st.metric(label="💧 Diâmetro Mediano (DMV)", value=f"{dmv} µm")
-            if dmv < 150: st.caption("⚠️ **Gotas Finas:** Risco de deriva.")
-            elif 150 <= dmv <= 300: st.caption("✅ **Gotas Médias:** Ótimo equilíbrio.")
-            else: st.caption("⚠️ **Gotas Grossas:** Risco de escorrimento.")
         with col_dash2:
             st.metric(label="📈 Densidade de Gotas", value=f"{densidade} g/cm²")
-            if densidade >= 60: st.markdown("<span style='color:green; font-weight:bold;'>🟢 DENSIDADE IDEAL</span>", unsafe_allow_html=True)
-            else: st.markdown("<span style='color:red; font-weight:bold;'>🔴 DENSIDADE BAIXA</span>", unsafe_allow_html=True)
         with col_dash3:
             st.metric(label="🎯 Cobertura do Alvo", value=f"{cobertura} %")
-            st.caption("Área total atingida.")
         with col_dash4:
             st.metric(label="🔢 Total de Gotas", value=int(num_gotas))
-            st.caption("Contagem absoluta.")
 
         st.write("---")
         with st.expander("🔍 Ver Dados Completos em Tabela (Excel)"):
@@ -363,20 +358,19 @@ if arquivo_enviado:
                 pdf.set_font("Arial", "", 8)
                 pdf.cell(0, 4, f"Amostra Identificada: {nome_arquivo}", ln=True, align="C")
                 
-                # Inserção dos Logotipos no Header Lateral
+                # Logotipos nas laterais logo abaixo da barra escura
                 if os.path.exists(CAMINHO_LOGO_IAC):
-                    pdf.image(CAMINHO_LOGO_IAC, x=15, y=46, w=22)
+                    pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
                 if os.path.exists(CAMINHO_LOGO_APLIQUEBEM):
-                    pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=46, w=22)
+                    pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
                 
                 # --- SEÇÃO 1: CARDS DE PERFORMANCE OPERACIONAL ---
-                pdf.set_y(74)
+                pdf.set_y(78) # Aumentado espaço do topo
                 pdf.set_text_color(40, 50, 60)
                 pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 6, "1. Indicadores de Performance Operacional (Métricas Chave)", ln=True)
-                pdf.ln(2)
+                pdf.cell(0, 6, "1. Indicadores de Performance Operacional (Metricas Chave)", ln=True)
+                pdf.ln(3) # Mais respiro entre o título e os cards
                 
-                # Desenhar os Cards Lado a Lado (Estilo Dashboard Web)
                 indicadores = [
                     {"label": "DMV GERAL", "val": f"{dmv_atual} um", "status": classe_gota, "color": (80, 200, 120) if classe_gota == "Média" else (240, 170, 60)},
                     {"label": "DENSIDADE", "val": f"{densidade_atual} g/cm2", "status": "Ideal" if densidade_atual >= 60 else "Baixa", "color": (80, 200, 120) if densidade_atual >= 60 else (230, 80, 80)},
@@ -385,16 +379,13 @@ if arquivo_enviado:
                 
                 pos_x = 15
                 for ind in indicadores:
-                    # Fundo do Card
                     pdf.set_fill_color(248, 249, 250)
                     pdf.rect(pos_x, pdf.get_y(), 56, 22, 'F')
                     pdf.rect(pos_x, pdf.get_y(), 56, 22, 'D')
                     
-                    # Indicador de Status (Barra colorida inferior)
                     pdf.set_fill_color(*ind["color"])
                     pdf.rect(pos_x + 1, pdf.get_y() + 20, 54, 1.5, 'F')
                     
-                    # Texto Interno do Card
                     pdf.set_font("Arial", "B", 8)
                     pdf.set_text_color(100, 110, 120)
                     pdf.text(pos_x + 4, pdf.get_y() + 5, ind["label"])
@@ -409,13 +400,13 @@ if arquivo_enviado:
                     
                     pos_x += 62
                 
-                # --- SEÇÃO 2: QUADRADO DINÂMICO DE COBERTURA REAL (SUA IDEIA!) ---
-                pdf.set_y(104)
+                # --- SEÇÃO 2: QUADRADO DINÂMICO DE COBERTURA & HISTOGRAMA ---
+                pdf.set_y(114) # Aumentado espaçamento para não colar nos cards superiores
                 pdf.set_font("Arial", "B", 11)
                 pdf.set_text_color(40, 50, 60)
                 pdf.cell(100, 6, "2. Representacao da Cobertura Real no Alvo", False)
                 pdf.cell(80, 6, "3. Distribuicao Volumetrica das Gotas", ln=True)
-                pdf.ln(3)
+                pdf.ln(4)
                 
                 y_secao2 = pdf.get_y()
                 
@@ -425,22 +416,19 @@ if arquivo_enviado:
                 pdf.rect(15, y_secao2, 85, 42, 'D')
                 
                 # Desenhar o "Bloco Foliar" (Proporção da Cobertura)
-                pdf.set_fill_color(220, 225, 230)  # Fundo da folha (vazia)
+                pdf.set_fill_color(220, 225, 230)
                 pdf.rect(20, y_secao2 + 6, 30, 30, 'F')
                 
-                # Preenchimento dinâmico correspondente a porcentagem
                 porcentagem_fator = min(100.0, float(cobertura_atual)) / 100.0
                 altura_preenchida = 30 * porcentagem_fator
-                pdf.set_fill_color(0, 110, 180)  # Azul Líquido Metálico
+                pdf.set_fill_color(0, 110, 180)
                 pdf.rect(20, (y_secao2 + 6 + 30) - altura_preenchida, 30, altura_preenchida, 'F')
                 
-                # Linhas do Grid sobrepostas para dar o aspecto de alvo matemático
                 pdf.set_draw_color(255, 255, 255)
                 pdf.line(35, y_secao2 + 6, 35, y_secao2 + 6 + 30)
                 pdf.line(20, y_secao2 + 21, 50, y_secao2 + 21)
-                pdf.set_draw_color(0, 0, 0) # Reseta borda para preto
+                pdf.set_draw_color(0, 0, 0)
                 
-                # Legenda do Quadrado
                 pdf.set_font("Arial", "B", 18)
                 pdf.set_text_color(0, 90, 160)
                 pdf.text(54, y_secao2 + 18, f"{cobertura_atual} %")
@@ -459,11 +447,9 @@ if arquivo_enviado:
                     pdf.set_text_color(50, 50, 50)
                     pdf.text(110, y_secao2 + 6 + (i * 11), l_classes[i])
                     
-                    # Barra de Fundo Fria
                     pdf.set_fill_color(240, 240, 240)
                     pdf.rect(140, y_secao2 + 2 + (i * 11), 40, 5, 'F')
                     
-                    # Barra Ativa Colorida Proporcional
                     pdf.set_fill_color(*c_barras[i])
                     largura_barra_grafico = max(1, int(40 * (v_classes[i] / 100.0)))
                     pdf.rect(140, y_secao2 + 2 + (i * 11), largura_barra_grafico, 5, 'F')
@@ -472,11 +458,11 @@ if arquivo_enviado:
                     pdf.text(183, y_secao2 + 6 + (i * 11), f"{v_classes[i]}%")
                 
                 # --- SEÇÃO 3: RECOMENDAÇÕES E INSIGHTS ---
-                pdf.set_y(154)
+                pdf.set_y(168) # Aumentado para dar espaço confortável da seção anterior
                 pdf.set_font("Arial", "B", 11)
                 pdf.set_text_color(40, 50, 60)
                 pdf.cell(0, 6, "4. Diagnostico de Campo e Engenharia de Calibracao", ln=True)
-                pdf.ln(1)
+                pdf.ln(2)
                 
                 pdf.set_fill_color(255, 251, 230)
                 pdf.set_text_color(90, 70, 10)
@@ -484,32 +470,42 @@ if arquivo_enviado:
                 texto_quadro = f"Recomendacoes de Manejo:\n[DERIVA] -> {rec_deriva}\n[DENSIDADE] -> {rec_densidade}"
                 pdf.multi_cell(180, 5, texto_quadro, border=1, fill=True)
                 
-                # --- SEÇÃO 4: CARTÃO DIGITALIZADO EM MOLDURA ---
-                pdf.set_y(184)
+                # --- SEÇÃO 4: CARTÃO DIGITALIZADO NA HORIZONTAL ---
+                pdf.set_y(202) # Posicionamento estratégico e espaçado
                 pdf.set_text_color(40, 50, 60)
                 pdf.set_font("Arial", "B", 11)
-                pdf.cell(0, 6, "5. Amostragem Digital de Alta Precisao (Isolamento do Alvo)", ln=True)
-                pdf.ln(2)
+                pdf.cell(0, 6, "5. Amostragem Digital de Alta Precisao (Cartao na Horizontal)", ln=True)
+                pdf.ln(3)
                 
                 if nome_arquivo in imagens_processadas:
+                    # Converte a matriz cv2 para o formato PIL Image
                     img_f = Image.fromarray(cv2.cvtColor(imagens_processadas[nome_arquivo]["focada_bgr"], cv2.COLOR_BGR2RGB))
-                    tmp = "tmp_laudo_premium.jpg"
-                    img_f.save(tmp, "JPEG", quality=95)
                     
-                    # Sombra/Moldura estética para o cartão hidrossensível
+                    # MAGIA: Rotacionamos a imagem em 90 graus para deitá-la horizontalmente de forma perfeita
+                    img_horizontal = img_f.rotate(90, expand=True)
+                    
+                    tmp = "tmp_laudo_premium_h.jpg"
+                    img_horizontal.save(tmp, "JPEG", quality=95)
+                    
+                    # Moldura cinza de suporte adaptada para o tamanho horizontal (proporcional ao seu cartão 30x80)
+                    largura_alvo_pdf = 110
+                    altura_alvo_pdf = 42
+                    x_centralizado = (210 - largura_alvo_pdf) / 2
+                    
                     pdf.set_fill_color(230, 235, 240)
-                    pdf.rect(79, pdf.get_y() - 1, 52, 67, 'F')
+                    pdf.rect(x_centralizado - 1, pdf.get_y() - 1, largura_alvo_pdf + 2, altura_alvo_pdf + 2, 'F')
                     
-                    pdf.image(tmp, x=80, y=pdf.get_y(), w=50)
+                    # Insere o cartão deitado e perfeitamente simétrico
+                    pdf.image(tmp, x=x_centralizado, y=pdf.get_y(), w=largura_alvo_pdf, h=altura_alvo_pdf)
                     if os.path.exists(tmp): os.remove(tmp)
                 
-                # Rodapé de Validade Científica
-                pdf.set_y(265)
+                # Rodapé de Validade Científica afastado do conteúdo principal
+                pdf.set_y(268)
                 pdf.set_draw_color(200, 200, 200)
                 pdf.line(15, pdf.get_y(), 195, pdf.get_y())
                 pdf.set_font("Arial", "I", 7.5)
                 pdf.set_text_color(140, 140, 140)
-                pdf.cell(0, 5, "Este laudo representa uma estimativa automatizada baseada em algoritmos de processamento de imagem digital.", ln=True, align="C")
+                pdf.cell(0, 4, "Este laudo representa uma estimativa automatizada baseada em algoritmos de processamento de imagem digital.", ln=True, align="C")
                 pdf.cell(0, 4, "Algoritmo Computacional de Calibracao Hidrossensivel IAC / Aplique Bem 2026. Todos os direitos reservados.", ln=True, align="C")
 
                 pdf_out = pdf.output(dest='S')
