@@ -11,11 +11,25 @@ import requests
 from PIL import Image
 from fpdf import FPDF
 import plotly.graph_objects as go
+from streamlit.web.server.websocket_headers import _get_websocket_headers
 
 # Registra o suporte a arquivos HEIC/HEIF do iPhone
 register_heif_opener()
 
 st.set_page_config(page_title="Gota Inteligente - IAC & Aplique Bem", page_icon="💧", layout="wide")
+
+# ==============================================================================
+# 📱 DETECÇÃO DE DISPOSITIVO (CELULAR VS COMPUTADOR)
+# ==============================================================================
+def detectar_dispositivo():
+    headers = _get_websocket_headers()
+    if headers:
+        user_agent = headers.get("User-Agent", "").lower()
+        if any(term in user_agent for term in ["android", "iphone", "ipad", "mobile", "windows phone"]):
+            return "Celular"
+    return "Computador"
+
+dispositivo_atual = detectar_dispositivo()
 
 # ==============================================================================
 # 🗄️ CONFIGURAÇÃO DO BANCO DE DADOS LOCAL (SQLITE)
@@ -56,7 +70,7 @@ def salvar_analise_bd(arquivo, tipo, cob, gotas, dens, dmv, span, classe):
 inicializar_banco()
 
 # ==============================================================================
-# 🖼️ CONFIGURAÇÃO DOS LOGOTIPOS LOCAIS (RAIZ DO REPOSITÓRIO)
+# 🖼️ CONFIGURAÇÃO DOS LOGOTIPOS LOCAIS
 # ==============================================================================
 CAMINHO_LOGO_IAC = "logo_iac.png.png" 
 CAMINHO_LOGO_APLIQUEBEM = "logo_aplique.png.jpg"
@@ -126,6 +140,13 @@ def buscar_clima_cidade(nome_cidade):
 if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
+
+# Informa o modo dinâmico na sidebar
+if dispositivo_atual == "Celular":
+    st.sidebar.success("📱 Interface Mobile Otimizada")
+else:
+    st.sidebar.info("💻 Interface Desktop Ativada")
+
 if st.sidebar.button("🚪 Encerrar Sessão", use_container_width=True):
     st.session_state["autenticado"] = False
     st.rerun()
@@ -163,7 +184,11 @@ aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
 
 with aba_upload:
     st.subheader("📸 Captura do Cartão Hidrossensível")
-    metodo_captura = st.radio("Inserção:", ["Usar a Câmera do Celular", "Enviar foto da Galeria"], horizontal=True)
+    
+    # Adaptação de Interface baseada no Dispositivo
+    opcao_padrao = 0 if dispositivo_atual == "Celular" else 1
+    metodo_captura = st.radio("Inserção:", ["Usar a Câmera do Celular", "Enviar foto da Galeria"], index=opcao_padrao, horizontal=True)
+    
     arquivo_enviado = st.camera_input("Foto") if metodo_captura == "Usar a Câmera do Celular" else st.file_uploader("Arquivo", type=['jpg', 'jpeg', 'png', 'heic', 'heif'])
 
 def classificar_asabe(dmv_val):
@@ -205,6 +230,17 @@ if arquivo_enviado:
                 x, y, w, h = cv2.boundingRect(maior_contorno)
                 img_focada = img_original[y:y+h, x:x+w]
         
+        # ✂️ ESTRATÉGIA 1: CORTE DE SEGURANÇA DAS BORDAS (BORDER CROP)
+        # Corta fora 8% de cada extremidade para ignorar o corte do papel e marcas de dedo
+        alt_f, larg_f = img_focada.shape[:2]
+        margem_y = int(alt_f * 0.08)
+        margem_x = int(larg_f * 0.08)
+        
+        # Garante que o corte só ocorra se a imagem final mantiver tamanho mínimo estável
+        if alt_f > (margem_y * 2) and larg_f > (margem_x * 2):
+            img_focada = img_focada[margem_y : alt_f - margem_y, margem_x : larg_f - margem_x]
+            
+        # Recalcula dimensões da área real útil limpa
         altura_px, largura_px = img_focada.shape[:2]
         area_total_pixels = altura_px * largura_px
         area_cartao_cm2 = (30.0 / 10.0) * (80.0 / 10.0)
@@ -342,7 +378,9 @@ if arquivo_enviado:
             
             st.write("---")
             st.markdown("### 🛰️ Comparação Espacial Realística 3D (Efeito do Impacto)")
-            col_3d_1, col_3d_2 = st.columns(2)
+            
+            # Ajusta colunas dos gráficos 3D se for celular para não espremer a tela
+            col_3d_1, col_3d_2 = st.columns(1) if dispositivo_atual == "Celular" else st.columns(2)
             with col_3d_1:
                 st.markdown("<h4 style='text-align: center; color: #0099ff;'>🛰️ 1. Gota em Voo Sustentado (Esfera)</h4>", unsafe_allow_html=True)
                 st.plotly_chart(fig_sph, use_container_width=True)
@@ -353,9 +391,9 @@ if arquivo_enviado:
     with aba_inspecao:
         st.subheader("🔍 Inspeção e Isolamento do Cartão")
         if nome_arquivo in imagens_processadas:
-            col_i1, col_i2 = st.columns(2)
-            col_i1.image(imagens_processadas[nome_arquivo]["original"], caption="Foto de Entrada", use_container_width=True)
-            col_i2.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil Isolada (Gotas em Verde)", use_container_width=True)
+            col_i1, col_i2 = st.columns(1) if dispositivo_atual == "Celular" else st.columns(2)
+            col_i1.image(imagens_processadas[nome_arquivo]["original"], caption="Foto de Entrada (Capturada)", use_container_width=True)
+            col_i2.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil com Borda Cortada (Gotas Isoladas)", use_container_width=True)
 
     with aba_relatorio:
         st.markdown("## 📋 Geração de Laudo Técnico")
@@ -387,7 +425,6 @@ if arquivo_enviado:
             pdf.set_font("Arial", "I", 9)
             pdf.cell(0, 5, "Homologacao Tecnica Operacional: IAC & Programa Aplique Bem", ln=True, align="C")
             
-            # Busca logotipos da raiz do diretório ativo
             if os.path.exists(CAMINHO_LOGO_IAC): pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
             if os.path.exists(CAMINHO_LOGO_APLIQUEBEM): pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
             
@@ -490,7 +527,6 @@ if arquivo_enviado:
             pdf.set_text_color(140, 140, 140)
             pdf.cell(0, 4, "Algoritmo Computacional de Calibracao Hidrossensivel IAC / Aplique Bem 2026.", ln=True, align="C")
 
-            # CORREÇÃO DO ERRO DO STREAMLIT CLOUD: Codifica a string gerada para bytes puros (latin1)
             return pdf.output(dest='S').encode('latin1')
 
         pdf_bytes = gerar_pdf_laudo_grafico()
