@@ -31,7 +31,7 @@ img_iac = carregar_logo(CAMINHO_LOGO_IAC)
 img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 
 # ==============================================================================
-# 🔐 SISTEMA DE CONTROLE DE ACESSO (TELA DE INÍCIO ESTILIZADA)
+# 🔐 TELA DE LOGIN CENTRALIZADA E PROPORCIONAL
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
     "andre": "agro2026",      
@@ -42,22 +42,33 @@ if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
 if not st.session_state["autenticado"]:
-    st.markdown("<br>", unsafe_allow_html=True)
+    # Espaçamento para descer o conteúdo para o centro da tela
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
     
-    col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
-    with col_logo2:
-        col_l, col_r = st.columns(2)
-        if img_iac: col_l.image(img_iac, use_container_width=True)
-        if img_aplique: col_r.image(img_aplique, use_container_width=True)
-            
-    col_login, _ = st.columns([1, 1])
-    with col_login:
-        st.markdown("## 🔒 Gota Inteligente - Acesso Restrito")
-        st.markdown("Plataforma oficial de análise digitalizada de pulverização em parceria com o **IAC** e **Programa Aplique Bem**.")
+    # Criamos 3 colunas para centralizar o bloco principal (1 lateral, 2 central, 1 lateral)
+    _, col_central, _ = st.columns([1, 2, 1])
+    
+    with col_central:
+        # Bloco dos Logotipos
+        # Usamos colunas internas para colocar os logos lado a lado
+        l1, l2 = st.columns(2)
+        with l1:
+            if img_iac:
+                # Ajustamos a largura para que o logo vertical (IAC) não fique gigante
+                st.image(img_iac, width=200) 
+        with l2:
+            if img_aplique:
+                # Ajustamos para que o logo horizontal (Aplique Bem) acompanhe a proporção
+                st.image(img_aplique, width=220)
+
+        # Título e Login
+        st.markdown("<h2 style='text-align: center; color: #005088;'>🔒 Gota Inteligente - Acesso Restrito</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center;'>Plataforma oficial de análise digitalizada de pulverização em parceria com o <b>IAC</b> e <b>Programa Aplique Bem</b>.</p>", unsafe_allow_html=True)
         
         usuario_input = st.text_input("Usuário de Acesso:", key="user_login")
         senha_input = st.text_input("Senha de Segurança:", type="password", key="password_login")
         
+        st.markdown("<br>", unsafe_allow_html=True)
         botao_entrar = st.button("🔑 Verificar Autorização", use_container_width=True)
         
         if botao_entrar:
@@ -74,8 +85,8 @@ if not st.session_state["autenticado"]:
 # 💧 APLICATIVO PRINCIPAL (SÓ EXECUTA SE AUTENTICADO)
 # ==============================================================================
 
-# Logos no Topo da Barra Lateral
-if img_iac: st.sidebar.image(img_iac, width=120)
+# Logos menores no Topo da Barra Lateral para não ocupar espaço
+if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 
 st.sidebar.markdown("---")
@@ -89,9 +100,10 @@ with col_tit:
     st.title("💧 Analisador de Gotas Inteligente")
     st.markdown("**Parceria Científica:** Instituto Agronômico (IAC) & Programa Aplique Bem")
 with col_logos_topo:
-    col_t1, col_t2 = st.columns(2)
-    if img_iac: col_t1.image(img_iac, width=100)
-    if img_aplique: col_t2.image(img_aplique, width=100)
+    # Mantemos os logos pequenos no topo do app também
+    ct1, ct2 = st.columns(2)
+    if img_iac: ct1.image(img_iac, width=80)
+    if img_aplique: ct2.image(img_aplique, width=90)
 
 st.write("---")
 
@@ -263,7 +275,7 @@ if arquivo_enviado:
 
     df_geral = pd.DataFrame(resultados_gerais)
 
-    # --- ABA 1: DASHBOARD EM TELA ---
+    # --- DASHBOARD DE RESULTADOS ---
     with aba_upload:
         st.write("---")
         st.markdown("### 📊 Dashboard de Resultados da Amostra")
@@ -312,7 +324,7 @@ if arquivo_enviado:
             csv_formatado = formatar_csv_br(df_geral)
             st.download_button(label="📥 Baixar Tabela (.CSV Excel)", data=csv_formatado, file_name="dados_gotas.csv", mime="text/csv", use_container_width=True)
 
-    # --- ABA 2: GRÁFICOS ---
+    # --- GRÁFICOS ---
     with aba_graficos:
         st.subheader("Análise Gráfica Estatística")
         if nome_arquivo in dados_graficos:
@@ -328,7 +340,7 @@ if arquivo_enviado:
                 df_classes = pd.DataFrame({"Percentual (%)": classes}, index=['Pequenas (<150µm)', 'Médias (150-300µm)', 'Grandes (>300µm)'])
                 st.bar_chart(df_classes)
 
-    # --- ABA 3: INSPEÇÃO ---
+    # --- INSPEÇÃO ---
     with aba_inspecao:
         st.subheader("🔍 Inspeção e Isolamento do Cartão")
         if nome_arquivo in imagens_processadas:
@@ -338,7 +350,7 @@ if arquivo_enviado:
             with col_i2:
                 st.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil Isolada (Gotas em Verde)", use_container_width=True)
 
-    # --- ABA 4: LAUDO ---
+    # --- LAUDO EM PDF ---
     with aba_relatorio:
         st.markdown("## 📋 Laudo de Campo Homologado IAC & Aplique Bem")
         st.markdown("---")
@@ -361,16 +373,12 @@ if arquivo_enviado:
             rec_densidade = "Densidade Insuficiente: Aumente o volume de calda (L/ha) ou adere bicos de maior vazão." if densidade_atual < 60 else "Densidade Excelente: Quantidade ideal para deposição."
             st.warning(f"1. {rec_deriva}\n\n2. {rec_densidade}")
 
-            # --- ENGINE DE GERAÇÃO DO PDF ---
             def gerar_pdf_laudo_grafico(cv_val):
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_margins(15, 15, 15)
-                
-                # Barra Superior Azul
                 pdf.set_fill_color(0, 80, 136)
                 pdf.rect(0, 0, 210, 38, 'F')
-                
                 pdf.set_font("Arial", "B", 13)
                 pdf.set_text_color(255, 255, 255)
                 pdf.cell(0, 10, "LAUDO DIGITAL DE QUALIDADE DE APLICACAO", ln=True, align="C")
@@ -379,20 +387,16 @@ if arquivo_enviado:
                 pdf.cell(0, 4, f"Documento de Campo - Arquivo Original: {nome_arquivo}", ln=True, align="C")
                 pdf.ln(18)
                 
-                # Desenhar logotipos se existirem direto na raiz (Ajustado)
                 if os.path.exists(CAMINHO_LOGO_IAC):
                     pdf.image(CAMINHO_LOGO_IAC, x=15, y=42, w=22)
                 if os.path.exists(CAMINHO_LOGO_APLIQUEBEM):
                     pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=42, w=22)
                 
                 pdf.set_y(68)
-                
-                # Seção 1: Métricas
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("Arial", "B", 11)
                 pdf.cell(0, 8, "1. Indicadores de Campo Fundamentais", ln=True)
                 pdf.set_font("Arial", "", 10)
-                
                 pdf.cell(90, 6, f"- Diametro Mediano Volumetrico (DMV): {dmv_atual} um ({classe_gota})", ln=True)
                 pdf.cell(90, 6, f"- Densidade Global Observada: {densidade_atual} gotas/cm2", ln=True)
                 pdf.cell(90, 6, f"- Cobertura Real da Area Foliar: {cobertura_atual}%", ln=True)
@@ -400,73 +404,56 @@ if arquivo_enviado:
                 pdf.cell(90, 6, f"- Coeficiente de Variacao Espacial: {cv_val}%", ln=True)
                 pdf.ln(6)
                 
-                # Seção 2: Gráficos
                 pdf.set_font("Arial", "B", 11)
                 pdf.cell(0, 8, "2. Grafico de Distribuicao do Espectro de Gotas (%)", ln=True)
                 pdf.ln(4)
                 
-                valores_classes = [deriva_atual, medias_atual, grandes_atual]
-                labels_classes = ["Gotas Finas (<150um)", "Gotas Medias (150-300um)", "Gotas Grossas (>300um)"]
-                cores_barras = [(230, 80, 80), (80, 200, 120), (80, 120, 200)]
+                v_classes = [deriva_atual, medias_atual, grandes_atual]
+                l_classes = ["Gotas Finas (<150um)", "Gotas Medias (150-300um)", "Gotas Grossas (>300um)"]
+                c_barras = [(230, 80, 80), (80, 200, 120), (80, 120, 200)]
                 
-                inicio_y = pdf.get_y()
+                iy = pdf.get_y()
                 for i in range(3):
                     pdf.set_font("Arial", "", 9)
-                    pdf.text(16, inicio_y + (i * 12) + 5, labels_classes[i])
-                    
+                    pdf.text(16, iy + (i * 12) + 5, l_classes[i])
                     pdf.set_fill_color(240, 240, 240)
-                    pdf.rect(60, inicio_y + (i * 12), 100, 7, 'F')
-                    
-                    largura_barra = max(1, int(valores_classes[i]))
-                    pdf.set_fill_color(*cores_barras[i])
-                    pdf.rect(60, inicio_y + (i * 12), largura_barra, 7, 'F')
-                    
-                    pdf.set_font("Arial", "B", 9)
-                    pdf.text(165, inicio_y + (i * 12) + 5, f"{valores_classes[i]}%")
+                    pdf.rect(60, iy + (i * 12), 100, 7, 'F')
+                    pdf.set_fill_color(*c_barras[i])
+                    pdf.rect(60, iy + (i * 12), max(1, int(v_classes[i])), 7, 'F')
+                    pdf.text(165, iy + (i * 12) + 5, f"{v_classes[i]}%")
                 
-                pdf.set_y(inicio_y + 40)
-                
-                # Seção 3: Recomendações
+                pdf.set_y(iy + 40)
                 pdf.set_font("Arial", "B", 11)
                 pdf.cell(0, 8, "3. Plano de Acao e Recomendacoes Tecnicas", ln=True)
                 pdf.ln(2)
                 pdf.set_fill_color(255, 243, 205)
                 pdf.set_text_color(102, 77, 3)
                 pdf.set_font("Arial", "", 9.5)
-                texto_laudo = f"Recomendacoes de Campo:\n- {rec_deriva}\n- {rec_densidade}"
-                pdf.multi_cell(180, 5, texto_laudo, border=1, fill=True)
+                t_laudo = f"Recomendacoes de Campo:\n- {rec_deriva}\n- {rec_densidade}"
+                pdf.multi_cell(180, 5, t_laudo, border=1, fill=True)
                 pdf.ln(6)
                 
-                # Seção 4: Imagem do Cartão
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("Arial", "B", 11)
                 pdf.cell(0, 8, "4. Amostra Digitalizada do Cartao", ln=True)
                 pdf.ln(2)
                 
-                img_focada_rgb = cv2.cvtColor(imagens_processadas[nome_arquivo]["focada_bgr"], cv2.COLOR_BGR2RGB)
-                pil_focada = Image.fromarray(img_focada_rgb)
-                
-                path_tmp = "tmp_laudo_focado.jpg"
-                pil_focada.save(path_tmp, "JPEG", quality=90)
-                
-                pdf.image(path_tmp, x=75, y=pdf.get_y(), w=60)
-                
-                if os.path.exists(path_tmp):
-                    os.remove(path_tmp)
+                if nome_arquivo in imagens_processadas:
+                    img_f = Image.fromarray(cv2.cvtColor(imagens_processadas[nome_arquivo]["focada_bgr"], cv2.COLOR_BGR2RGB))
+                    tmp = "tmp_laudo.jpg"
+                    img_f.save(tmp, "JPEG", quality=90)
+                    pdf.image(tmp, x=75, y=pdf.get_y(), w=60)
+                    if os.path.exists(tmp): os.remove(tmp)
 
-                pdf_output_str = pdf.output(dest='S')
-                if isinstance(pdf_output_str, str):
-                    return pdf_output_str.encode('latin1')
-                return bytes(pdf_output_str)
+                pdf_out = pdf.output(dest='S')
+                return pdf_out.encode('latin1') if isinstance(pdf_out, str) else bytes(pdf_out)
 
-            # Passando explicitamente o valor para evitar erro de escopo do Python
-            pdf_bytes = gerar_pdf_laudo_grafico(cv_global)
+            pdf_b = gerar_pdf_laudo_grafico(cv_global)
             
-            st.write("")
             st.download_button(
                 label="📥 Baixar Laudo de Campo em PDF",
-                data=pdf_bytes,
-                file_name=f"Laudo_IAC_ApliqueBem_{nome_arquivo.split('.')[0]}.pdf",
+                data=pdf_b,
+                file_name=f"Laudo_IAC_{nome_arquivo.split('.')[0]}.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
