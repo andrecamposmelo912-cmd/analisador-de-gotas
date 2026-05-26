@@ -1,4 +1,3 @@
-cat << 'EOF' > ~/Documents/app.py
 import streamlit as st
 import cv2
 import numpy as np
@@ -62,4 +61,3 @@ if arquivos_enviados:
 
     csv = df.to_csv(index=False).encode('utf-8-sig')
     st.download_button(label="📥 Baixar Resultados em Excel (CSV)", data=csv, file_name="analise_hidrosoluvel.csv", mime="text/csv")
-EOF
