@@ -22,14 +22,12 @@ st.set_page_config(page_title="Gota Inteligente - IAC & Aplique Bem", page_icon=
 # 📱 DETECÇÃO DE DISPOSITIVO SEGURA (JAVASCRIPT BROWSER)
 # ==============================================================================
 def obter_dispositivo():
-    # Injeta um script invisível no navegador para ler a tela/UserAgent de forma pública
     js_detector = """
         <script>
         const renderContext = window.parent || window;
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
                          || (window.innerWidth <= 768);
         
-        // Envia a resposta de volta para o ambiente do Streamlit se houver suporte a mensagens
         if (renderContext.postMessage) {
             renderContext.postMessage({
                 type: 'streamlit:setComponentValue',
@@ -38,15 +36,10 @@ def obter_dispositivo():
         }
         </script>
     """
-    # Cria uma chave única no session_state para guardar o aparelho
     if "tipo_dispositivo" not in st.session_state:
-        st.session_state["tipo_dispositivo"] = "Computador" # Valor padrão de segurança
+        st.session_state["tipo_dispositivo"] = "Computador"
         
-    # Executa o componente em background
     components.html(js_detector, height=0, width=0)
-    
-    # Captura variações dinâmicas de query parameters se o dispositivo for passado por lá,
-    # ou mantém o estado detectado pelo navegador
     return st.session_state["tipo_dispositivo"]
 
 dispositivo_atual = obter_dispositivo()
@@ -161,7 +154,6 @@ if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
 
-# Seletor manual extra de contingência caso o Javascript seja bloqueado no navegador do produtor
 opcao_dispositivo = st.sidebar.selectbox("Visualização de Tela:", ["Automático (Detecção)", "Forçar Celular", "Forçar Computador"])
 if opcao_dispositivo == "Forçar Celular": dispositivo_ajustado = "Celular"
 elif opcao_dispositivo == "Forçar Computador": dispositivo_ajustado = "Computador"
@@ -209,11 +201,8 @@ aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
 
 with aba_upload:
     st.subheader("📸 Captura do Cartão Hidrossensível")
-    
-    # Interface dinâmica baseada no dispositivo verificado
     opcao_padrao = 0 if dispositivo_ajustado == "Celular" else 1
     metodo_captura = st.radio("Inserção:", ["Usar a Câmera do Celular", "Enviar foto da Galeria"], index=opcao_padrao, horizontal=True)
-    
     arquivo_enviado = st.camera_input("Foto") if metodo_captura == "Usar a Câmera do Celular" else st.file_uploader("Arquivo", type=['jpg', 'jpeg', 'png', 'heic', 'heif'])
 
 def classificar_asabe(dmv_val):
@@ -409,12 +398,70 @@ if arquivo_enviado:
                 st.markdown("<h4 style='text-align: center; color: #2e7d32;'>🎯 2. Deposição Hidrodinâmica no Alvo</h4>", unsafe_allow_html=True)
                 st.plotly_chart(fig_imp, use_container_width=True)
 
+    # ==============================================================================
+    # 🔍 ABA DE INSPEÇÃO DE CARTÕES (LABORATÓRIO VISUAL AVANÇADO)
+    # ==============================================================================
     with aba_inspecao:
-        st.subheader("🔍 Inspeção e Isolamento do Cartão")
+        st.subheader("🔍 Laboratório Computacional de Inspeção de Imagem")
+        st.markdown("Utilize os filtros abaixo para diagnosticar falhas operacionais, sobreposição de calda ou riscos de deriva invisíveis a olho nu.")
+        
         if nome_arquivo in imagens_processadas:
+            filtro_inspecao = st.selectbox(
+                "🔬 Escolha o Filtro de Diagnóstico Avançado:",
+                [
+                    "1. Visão Padrão (Isolamento de Gotas)",
+                    "2. Mapa de Calor de Deposição (Uniformidade da Barra)",
+                    "3. Isolamento Estrito de Deriva (Gotas Críticas < 150µm)",
+                    "4. Alerta de Coalescência (Sobreposição e Escorrimento)"
+                ]
+            )
+            
             col_i1, col_i2 = st.columns(1) if dispositivo_ajustado == "Celular" else st.columns(2)
-            col_i1.image(imagens_processadas[nome_arquivo]["original"], caption="Foto de Entrada (Capturada)", use_container_width=True)
-            col_i2.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil com Borda Cortada (Gotas Isoladas)", use_container_width=True)
+            
+            with col_i1:
+                st.image(imagens_processadas[nome_arquivo]["original"], caption="Foto Original de Campo", use_container_width=True)
+            
+            with col_i2:
+                if "1." in filtro_inspecao:
+                    st.image(imagens_processadas[nome_arquivo]["analisada"], caption="Gotas identificadas pelo algoritmo (Borda Cortada)", use_container_width=True)
+                    st.caption("ℹ️ Linhas verdes indicam o perímetro exato calculado para cada gota individual.")
+
+                elif "2." in filtro_inspecao:
+                    blur_map = cv2.GaussianBlur(mascara, (45, 45), 0)
+                    heatmap = cv2.applyColorMap(blur_map, cv2.COLORMAP_JET)
+                    heatmap_rgb = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+                    st.image(heatmap_rgb, caption="Mapa Térmico de Deposição de Calda", use_container_width=True)
+                    st.warning("⚠️ **Como analisar:** Áreas tendendo ao **vermelho/laranja** indicam acúmulos excessivos de calda. Zonas em **azul escuro** apontam falhas de deposição. Uma aplicação perfeita deve parecer um mosaico predominantemente verde/amarelo uniforme.")
+
+                elif "3." in filtro_inspecao:
+                    img_deriva = np.zeros_like(img_focada)
+                    cont_deriva = 0
+                    for i, c in enumerate(gotas_filtradas):
+                        if diametros_reais_um[i] < 150.0:
+                            cv2.drawContours(img_deriva, [c], -1, (255, 0, 180), -1)
+                            cont_deriva += 1
+                    img_deriva_rgb = cv2.cvtColor(img_deriva, cv2.COLOR_BGR2RGB)
+                    st.image(img_deriva_rgb, caption="Filtro de Espectro Crítico de Deriva (Exclusivo Gotas < 150µm)", use_container_width=True)
+                    perc_deriva = (cont_deriva / num_gotas * 100) if num_gotas > 0 else 0
+                    st.error(f"🚨 **Alerta de Deriva:** Foram localizadas **{cont_deriva} gotas minúsculas** nesta imagem (cor de rosa). Elas representam **{perc_deriva:.1f}%** do número total de gotas e correm o risco de evaporar antes de tocar o alvo caso a UR local baixe.")
+
+                elif "4." in filtro_inspecao:
+                    img_coalescencia = img_focada.copy()
+                    cont_coalescentes = 0
+                    for c in gotas_filtradas:
+                        area_p = cv2.contourArea(c)
+                        perimetro = cv2.arcLength(c, True)
+                        if perimetro > 0:
+                            circularidade = 4 * np.pi * (area_p / (perimetro ** 2))
+                            if circularidade < 0.55 and area_p > 150:
+                                cv2.drawContours(img_coalescencia, [c], -1, (0, 0, 255), 3)
+                                cont_coalescentes += 1
+                    img_coal_rgb = cv2.cvtColor(img_coalescencia, cv2.COLOR_BGR2RGB)
+                    st.image(img_coal_rgb, caption="Diagnóstico de Coalescência e Sobreposição de Impactos", use_container_width=True)
+                    if cont_coalescentes > 0:
+                        st.warning(f"⚠️ **Diagnóstico Técnico:** Detectamos **{cont_coalescentes} manchas com padrão de sobreposição** (contornos em vermelho). Isso indica que gotas colidiram entre si na folha. Se o fenômeno for generalizado, reduza a pressão ou aumente a velocidade do trator para evitar desperdício por escorrimento no solo.")
+                    else:
+                        st.success("✅ **Excelente:** Nenhuma zona de acúmulo por coalescência ou escorrimento crítico foi detectada. Gotas bem distribuídas!")
 
     with aba_relatorio:
         st.markdown("## 📋 Geração de Laudo Técnico")
