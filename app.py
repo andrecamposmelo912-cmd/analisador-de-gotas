@@ -6,6 +6,7 @@ import plotly.express as px
 from pillow_heif import register_heif_opener
 import io
 from PIL import Image
+from fpdf import FPDF
 
 # Registra o suporte a arquivos HEIC/HEIF do iPhone
 register_heif_opener()
@@ -235,11 +236,15 @@ if arquivos_enviados:
                     st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
 
     # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
- # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
-    # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
     with aba_relatorio:
-        st.subheader("📋 Laudo de Campo e Recomendações de Pulverização")
-        cartao_relatorio = st.selectbox("Selecione o cartão para gerar o Laudo:", list(dados_graficos.keys()), key="rel_select")
+        st.markdown("## 📋 Laudo de Campo e Recomendações de Pulverização")
+        st.markdown("---")
+        
+        cartao_relatorio = st.selectbox(
+            "Selecione o cartão para gerar o Laudo:", 
+            list(dados_graficos.keys()), 
+            key="rel_select"
+        )
         
         if cartao_relatorio:
             dados_cartao = df_geral[df_geral["Nome do Arquivo"] == cartao_relatorio].iloc[0]
@@ -250,75 +255,163 @@ if arquivos_enviados:
             span_atual = dados_cartao["Amplitude (SPAN)"]
             cobertura_atual = dados_cartao["Cobertura (%)"]
             
-            if dmv_atual < 100: classificação_gota = "Muito Fina (Risco crítico de evaporação)"
-            elif 100 <= dmv_atual < 150: classificação_gota = "Fina (Alta penetração, mas risco elevado de deriva)"
-            elif 150 <= dmv_atual <= 250: classificação_gota = "Média (Excelente equilíbrio para Fungicidas/Inseticidas)"
-            elif 250 < dmv_atual <= 350: classificação_gota = "Grossa (Ideal para Herbicidas Sistêmicos / Pré-emergentes)"
-            else: classificação_gota = "Muito Grossa (Risco de escorrimento nas folhas)"
+            # 1. Classificação do DMV
+            if dmv_atual < 100:
+                classe_gota = "Muito Fina 🛑"
+                interpretacao_dmv = "Risco critico de evaporacao e perda de produto antes de tocar o alvo."
+            elif 100 <= dmv_atual < 150:
+                classe_gota = "Fina ⚠️"
+                interpretacao_dmv = "Alta penetracao na cultura, mas exige atencao redobrada ao vento (risco de deriva)."
+            elif 150 <= dmv_atual <= 250:
+                classe_gota = "Media ✅"
+                interpretacao_dmv = "Excelente equilibrio. Tamanho ideal para a maioria dos Fungicidas e Inseticidas."
+            elif 250 < dmv_atual <= 350:
+                classe_gota = "Grossa 👍"
+                interpretacao_dmv = "Ideal para Herbicidas Sistemicos. Baixo risco de deriva e boa translocacao."
+            else:
+                classe_gota = "Muito Grossa ⚠️"
+                interpretacao_dmv = "Risco elevado de escorrimento do produto nas folhas, reduzindo a eficiencia."
 
-            txt_densidade = "Densidade ideal para fungicidas e alvos difíceis." if densidade_atual >= 60 else "Baixa densidade. Risco de o produto não atingir todo o alvo."
-            txt_deriva = "ALTO RISCO: Mais de 30% do volume aplicado pode evaporar ou se perder no trajeto." if deriva_atual > 30 else "Risco de deriva controlado e seguro sob condições normais."
-            txt_span = "Gotas muito uniformes (Espectro homogêneo)." if span_atual <= 1.2 else "Gotas desuniformes (Mistura perigosa de gotas muito grandes e muito pequenas)."
+            # 2. Exibição dos Blocos Informativos Nativos
+            st.markdown(f"### 🔍 Diagnóstico do Cartão: *{cartao_relatorio}*")
             
-            recom_deriva = "Se o Risco de Deriva está alto, reduza ligeiramente a pressão de trabalho ou utilize pontas com indução de ar." if deriva_atual > 30 else "Parabéns, os níveis de deriva estão baixos. Mantenha os parâmetros operacionais."
-            recom_densidade = "Sua densidade está baixa. Considere aumentar a taxa de aplicação ou usar bicos que quebrem mais o espectro, se o clima permitir." if densidade_atual < 60 else "Densidade excelente! Garante ótima cobertura e translocação do produto na folha."
+            col_card1, col_card2, col_card3 = st.columns(3)
+            with col_card1:
+                st.metric(label="📊 Tamanho Médio da Gota (DMV)", value=f"{dmv_atual} µm", delta=f"Classe: {classe_gota}", delta_color="off")
+                st.caption(f"**Análise:** {interpretacao_dmv}")
+                
+            with col_card2:
+                if densidade_atual >= 60:
+                    st.success(f"🔹 **Densidade:** {densidade_atual} gotas/cm²\n\n🟢 **Ideal:** Garante ótima cobertura do alvo técnico.")
+                else:
+                    st.error(f"🔹 **Densidade:** {densidade_atual} gotas/cm²\n\n🔴 **Baixa:** Risco do produto não cobrir todas as folhas do alvo.")
+                    
+            with col_card3:
+                if deriva_atual > 30:
+                    st.error(f"⚠️ **Potencial de Deriva:** {deriva_atual}%\n\n🔴 **Alto Risco:** Mais de 1/3 do volume pode ser perdido pelo vento.")
+                else:
+                    st.success(f"⚠️ **Potencial de Deriva:** {deriva_atual}%\n\n🟢 **Seguro:** Perda por deriva controlada dentro do limite aceitável.")
 
-            # Criamos a estrutura HTML pura em uma string separada
-            html_laudo = f"""
-            <div style="border:2px solid #1f77b4; padding:20px; border-radius:10px; background-color:#fafafa; font-family:Arial, sans-serif; color:#333;">
-                <h2 style="color:#1f77b4; margin-top:0; border-bottom:2px solid #1f77b4; padding-bottom:10px;">LAUDO DE AVALIAÇÃO DA QUALIDADE DE APLICAÇÃO</h2>
-                <p><strong>Identificação da Amostra:</strong> {cartao_relatorio} | <strong>Status do Sistema:</strong> Análise Concluída</p>
+            st.write("")
+            col_card4, col_card5 = st.columns(2)
+            with col_card4:
+                st.info(f"📈 **Uniformidade (SPAN):** {span_atual}\n\n" + 
+                        ("👍 Espectro homogeneo (gotas de tamanhos muito parecidos)." if span_atual <= 1.2 else "⚠️ Mistura de gotas muito grandes com muito pequenas."))
+            with col_card5:
+                st.info(f"💧 **Cobertura Real da Calda:** {cobertura_atual}% do cartao foi atingido.")
+
+            # Preparação das strings para o Plano de Ação
+            if deriva_atual > 30:
+                rec_deriva = "Risco de Deriva Elevado: Reduza ligeiramente a pressao de trabalho da bomba ou substitua as pontas por modelos com inducao de ar (tecnologia de pre-orificio/ar)."
+            else:
+                rec_deriva = "Controle de Deriva Eficiente: Os parametros de pressao e bico atuais estao segurando bem o produto no alvo. Mantenha a operacao."
                 
-                <h3 style="color:#2c3e50; margin-top:20px;">1. Diagnóstico do Espectro de Gotas</h3>
-                <table style="width:100%; border-collapse: collapse; margin-bottom:20px; background-color:#fff;">
-                    <thead>
-                        <tr style="background-color:#0073e6; color:white; text-align:left;">
-                            <th style="padding:12px; border:1px solid #ddd;">Parâmetro Analisado</th>
-                            <th style="padding:12px; border:1px solid #ddd;">Valor Lido</th>
-                            <th style="padding:12px; border:1px solid #ddd;">Interpretação Prática para o Campo</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td style="padding:12px; border:1px solid #ddd;"><strong>DMV (Diâmetro Mediano)</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; font-size:16px; color:#0056b3;"><strong>{dmv_atual} µm</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd;">Classe de Gotas: <strong>{classificação_gota}</strong></td>
-                        </tr>
-                        <tr style="background-color:#f9f9f9;">
-                            <td style="padding:12px; border:1px solid #ddd;"><strong>Densidade de Gotas</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{densidade_atual} gotas/cm²</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd;">{txt_densidade}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:12px; border:1px solid #ddd;"><strong>Potencial de Deriva</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; font-size:16px; color:#d62728;"><strong>{deriva_atual}%</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; color:#d62728;"><strong>{txt_deriva}</strong></td>
-                        </tr>
-                        <tr style="background-color:#f9f9f9;">
-                            <td style="padding:12px; border:1px solid #ddd;"><strong>Uniformidade (SPAN)</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{span_atual}</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd;">{txt_span}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:12px; border:1px solid #ddd;"><strong>Cobertura Real</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd; font-size:16px;"><strong>{cobertura_atual}%</strong></td>
-                            <td style="padding:12px; border:1px solid #ddd;">Porcentagem da área útil do cartão que recebeu a calda.</td>
-                        </tr>
-                    </tbody>
-                </table>
-                
-                <h3 style="color:#2c3e50;">2. Recomendações e Plano de Ação do Especialista (IA)</h3>
-                <div style="background-color:#fff3cd; padding:15px; border-left:6px solid #ffc107; border-radius:4px; margin-bottom:15px; color:#664d03; line-height: 1.5;">
-                    <strong>💡 Como corrigir os problemas detectados neste cartão:</strong><br>
-                    • {recom_deriva}<br>
-                    • {recom_densidade}
-                </div>
-                
-                <p style="text-align:center; color:#777; font-size:12px; margin-top:40px; border-top:1px solid #ddd; padding-top:10px;">Relatório gerado automaticamente pelo Analisador Avançado de Gotas - Tecnologia Agro 2026</p>
-            </div>
-            """
+            if densidade_atual < 60:
+                rec_densidade = "Densidade de Gotas Insuficiente: Considere aumentar o volume de calda (L/ha) ou avaliar o espacamento entre bicos na barra para fechar as falhas de deposicao."
+            else:
+                rec_densidade = "Densidade Excelente: O volume e a quebra de gotas sao suficientes para atingir com eficacia o baixeiro ou alvos complexos."
+
+            st.write("---")
+            st.markdown("### 💡 Plano de Ação Recomendado pelo Especialista")
+            st.warning(f"""
+            **Siga as orientações abaixo para otimizar a sua aplicação no campo:**
             
-            # O comando correto que renderiza HTML de verdade no Streamlit sem falhar:
-            st.components.v1.html(html_laudo, height=550, scrolling=True)
+            1. 🛠️ {rec_deriva}
             
-            st.info("💡 **Dica de Impressão:** Para salvar esse laudo bonito como um documento PDF, basta clicar com o botão direito na página e escolher **Imprimir** (ou usar Ctrl + P) selecionando a opção 'Salvar como PDF'.")
+            2. 🎯 {rec_densidade}
+            
+            *Nota: Certifique-se sempre de que as condições climáticas locais (vento entre 3 a 10 km/h e UR acima de 55%) estão adequadas antes de iniciar a jornada.*
+            """)
+
+            # --- ENGINE DE GERAÇÃO DO PDF EM MEMÓRIA (FPDF2) ---
+            def gerar_pdf_laudo():
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_margins(15, 15, 15)
+                
+                # Cabeçalho do Laudo do Produtor
+                pdf.set_fill_color(31, 119, 180)
+                pdf.rect(0, 0, 210, 35, 'F')
+                
+                pdf.set_font("Arial", "B", 16)
+                pdf.set_text_color(255, 255, 255)
+                pdf.cell(0, 10, "LAUDO DE AVALIACAO DA QUALIDADE DE APLICACAO", ln=True, align="C")
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 5, f"Amostra: {cartao_relatorio} | Gerado por: Analisador Avancado de Gotas (IA)", ln=True, align="C")
+                pdf.ln(15)
+                
+                # Seção 1: Tabela Dinâmica de Resultados
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, "1. Diagnostico do Espectro de Gotas", ln=True)
+                pdf.ln(2)
+                
+                pdf.set_fill_color(230, 230, 230)
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(50, 8, "Parametro lido", border=1, fill=True)
+                pdf.cell(35, 8, "Valor", border=1, fill=True, align="C")
+                pdf.cell(95, 8, "Interpretacao Pratica de Campo", border=1, fill=True)
+                pdf.ln()
+                
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(50, 8, "DMV (Diametro Medio)", border=1)
+                pdf.cell(35, 8, f"{dmv_atual} um", border=1, align="C")
+                pdf.cell(95, 8, f"Classe de Gotas: {classe_gota.split(' ')[0]}", border=1)
+                pdf.ln()
+                
+                pdf.cell(50, 8, "Densidade de Gotas", border=1)
+                pdf.cell(35, 8, f"{densidade_atual} g/cm2", border=1, align="C")
+                pdf.cell(95, 8, "Adequada" if densidade_atual >= 60 else "Baixa densidade no alvo", border=1)
+                pdf.ln()
+                
+                pdf.cell(50, 8, "Potencial de Deriva", border=1)
+                pdf.cell(35, 8, f"{deriva_atual}%", border=1, align="C")
+                pdf.cell(95, 8, "Risco Alto (Vento/Evaporacao)" if deriva_atual > 30 else "Nivel seguro de deriva", border=1)
+                pdf.ln()
+                
+                pdf.cell(50, 8, "Uniformidade (SPAN)", border=1)
+                pdf.cell(35, 8, f"{span_atual}", border=1, align="C")
+                pdf.cell(95, 8, "Espectro Homogeneo" if span_atual <= 1.2 else "Alta variacao no tamanho", border=1)
+                pdf.ln()
+                
+                pdf.cell(50, 8, "Cobertura Real", border=1)
+                pdf.cell(35, 8, f"{cobertura_atual}%", border=1, align="C")
+                pdf.cell(95, 8, "Percentual de area util atingida", border=1)
+                pdf.ln(15)
+                
+                # Seção 2: Plano de Ação Consultivo
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, "2. Recomendacoes e Plano de Acao do Especialista", ln=True)
+                pdf.ln(2)
+                
+                pdf.set_fill_color(255, 243, 205)
+                pdf.set_text_color(102, 77, 3)
+                pdf.set_font("Arial", "", 10)
+                
+                texto_pdf = (
+                    f"Diretrizes para Otimizacao:\n\n"
+                    f"- {rec_deriva}\n\n"
+                    f"- {rec_densidade}\n\n"
+                    f"Nota: Aplique sempre com vento entre 3 e 10 km/h e UR acima de 55%."
+                )
+                pdf.multi_cell(180, 6, texto_pdf, border=1, fill=True)
+                
+                pdf.set_y(-25)
+                pdf.set_font("Arial", "I", 8)
+                pdf.set_text_color(128, 128, 128)
+                pdf.cell(0, 10, "Relatorio automatizado - Tecnologia Agro Inteligente 2026", align="C")
+                
+                return pdf.output()
+
+            # Gera os bytes do PDF
+            pdf_bytes = gerar_pdf_laudo()
+            
+            # Cria o botão físico de download nativo
+            st.write("")
+            st.download_button(
+                label="📥 Baixar Laudo de Campo em PDF",
+                data=pdf_bytes,
+                file_name=f"Laudo_Tecnico_{cartao_relatorio.split('.')[0]}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
