@@ -186,12 +186,12 @@ if arquivos_enviados:
         media_cv = df_geral["CV da Distribuição (%)"].mean()
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("DMV Medio Geral", f"{round(media_dmv, 1)} µm")
+        c1.metric("DMV Medio Geral", f"{round(media_dmv, 1)} um")
         
         if media_densidade >= 60:
-            c2.success(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🟢 Ideal")
+            st.success(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🟢 Ideal")
         else:
-            c2.error(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🔴 Baixa")
+            st.error(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🔴 Baixa")
             
         c3.metric("Cobertura Media", f"{round(media_cobertura, 2)} %")
         c4.metric("CV Espacial Medio", f"{round(media_cv, 1)} %")
@@ -321,7 +321,7 @@ if arquivos_enviados:
             2. {rec_densidade}
             """)
 
-            # --- ENGINE DE GERACAO DO PDF (FPDF2) ---
+            # --- ENGINE CORRIGIDA DE GERACAO DO PDF (FPDF2) ---
             def gerar_pdf_laudo():
                 pdf = FPDF()
                 pdf.add_page()
@@ -358,7 +358,7 @@ if arquivos_enviados:
                 pdf.ln()
                 
                 pdf.cell(50, 8, "Densidade", border=1)
-                pdf.cell(35, 8, f"{dados_cartao['Densidade (gotas/cm²)']} g/cm2", border=1, align="C")
+                pdf.cell(35, 8, f"{densidade_atual} g/cm2", border=1, align="C")
                 pdf.cell(95, 8, "Adequada" if densidade_atual >= 60 else "Baixa densidade", border=1)
                 pdf.ln()
                 
@@ -384,15 +384,21 @@ if arquivos_enviados:
                 texto_pdf = f"Recomendacoes de Campo:\n\n- {rec_deriva}\n\n- {rec_densidade}"
                 pdf.multi_cell(180, 6, texto_pdf, border=1, fill=True)
                 
-                return pdf.output()
+                # CORREÇÃO CIRÚRGICA: Força a saída para string de bytes bruta latente ('S')
+                # e faz o cast definitivo para bytes aceitos pelo Streamlit
+                pdf_output_str = pdf.output(dest='S')
+                if isinstance(pdf_output_str, str):
+                    return pdf_output_str.encode('latin1')
+                return bytes(pdf_output_str)
 
+            # Executa a função e obtém a sequência limpa de bytes
             pdf_bytes = gerar_pdf_laudo()
             
             st.write("")
             st.download_button(
-                label="Baixar Laudo de Campo em PDF",
+                label="📥 Baixar Laudo de Campo em PDF",
                 data=pdf_bytes,
-                file_name="Laudo_Tecnico_Campo.pdf",
+                file_name=f"Laudo_Tecnico_{cartao_relatorio.split('.')[0]}.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
