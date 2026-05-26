@@ -34,7 +34,9 @@ img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 # 🔐 TELA DE LOGIN CENTRALIZADA E PROPORCIONAL
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
-    "andre": "agro2026",      
+    "andre": "iaciac",
+    "manoel": "iaciac",  
+    "hamilton": "iaciac",  
     "iac": "apliquebem2026"  
 }
 
