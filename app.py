@@ -2,6 +2,8 @@ import streamlit as st
 import cv2
 import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Análise Avançada de Gotas", page_icon="💧", layout="wide")
 
@@ -16,10 +18,12 @@ st.sidebar.header("🛠️ Configurações de Calibração")
 fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", min_value=1.0, max_value=3.0, value=2.0, step=0.1, 
                                       help="Fator pelo qual a gota aumenta ao impactar o papel. O padrão de mercado é 2.0.")
 
+# Criando as abas na interface
+aba_upload, aba_graficos, aba_inspecao = st.tabs(["📥 Upload e Resultados", "📊 Gráficos do Espectro", "🔍 Inspeção de Cartões"])
+
 arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartões", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
 def formatar_csv_br(df):
-    # Converte colunas numéricas para string mudando ponto por vírgula (Padrão Excel BR)
     df_br = df.copy()
     for col in df_br.columns:
         if df_br[col].dtype in [np.float64, np.float32]:
@@ -28,7 +32,8 @@ def formatar_csv_br(df):
 
 if arquivos_enviados:
     resultados_gerais = []
-    st.subheader("⚙️ Processando Cartões e Extraindo Estatísticas...")
+    dados_graficos = {}
+    imagens_processadas = {}
     
     for arquivo in arquivos_enviados:
         # 1. Ler imagem
@@ -37,31 +42,25 @@ if arquivos_enviados:
         altura_px, largura_px = img.shape[:2]
         area_total_pixels = altura_px * largura_px
         
-        # Dimensões reais do cartão: 80mm x 30mm = 8cm x 3cm
         largura_mm = 30.0
         altura_mm = 80.0
-        area_cartao_cm2 = (largura_mm / 10.0) * (altura_mm / 10.0) # 24 cm²
+        area_cartao_cm2 = (largura_mm / 10.0) * (altura_mm / 10.0)
         
-        # Conversão de escala
         mm_por_pixel = largura_mm / largura_px
-        um_por_pixel = mm_por_pixel * 1000.0 # Micrômetros por pixel
+        um_por_pixel = mm_por_pixel * 1000.0
         
-        # 2. Inteligência de Cor: Identificar se o cartão é Amarelo ou Branco
+        # 2. Inteligência de Cor
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        
-        # Amostragem do centro para checar a cor predominante do fundo
         amostra_hsv = hsv[altura_px//4:3*altura_px//4, largura_px//4:3*largura_px//4]
         tom_medio_h = np.mean(amostra_hsv[:, :, 0])
         tom_medio_s = np.mean(amostra_hsv[:, :, 1])
         
-        # Se tiver alta saturação e tom na faixa do amarelo
         if 15 <= tom_medio_h <= 45 and tom_medio_s > 60:
             tipo_cartao = "Original (Amarelo)"
             amarelo_baixo = np.array([15, 50, 40])
             amarelo_alto = np.array([45, 255, 255])
             mascara_fundo = cv2.inRange(hsv, amarelo_baixo, amarelo_alto)
             mascara = cv2.bitwise_not(mascara_fundo)
-            
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
             mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
         else:
@@ -70,19 +69,16 @@ if arquivos_enviados:
             azul_alto = np.array([145, 255, 255])
             mascara = cv2.inRange(hsv, azul_baixo, azul_alto)
         
-        # 3. Detecção de Contornos (Gotas)
+        # 3. Contornos
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Filtrar ruídos micro
         gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
         num_gotas = len(gotas_filtradas)
         
-        # 4. Cálculos Básicos
         pixels_gotas = cv2.countNonZero(mascara)
         porcentagem_cobertura = (pixels_gotas / area_total_pixels) * 100
         densidade_gotas = num_gotas / area_cartao_cm2 if num_gotas > 0 else 0
         
-        # 5. Análise Estatística do Espectro de Gotas
+        # 4. Estatísticas de Diâmetro e Volume
         diametros_reais_um = []
         volumes_reais_um3 = []
         
@@ -91,7 +87,6 @@ if arquivos_enviados:
             diametro_mancha_px = 2.0 * np.sqrt(area_px / np.pi)
             diametro_mancha_um = diametro_mancha_px * um_por_pixel
             diametro_real_um = diametro_mancha_um / fator_espalhamento
-            
             volume_real_um3 = (4.0 / 3.0) * np.pi * ((diametro_real_um / 2.0) ** 3)
             
             diametros_reais_um.append(diametro_real_um)
@@ -100,7 +95,6 @@ if arquivos_enviados:
         diametros_reais_um = np.array(diametros_reais_um)
         volumes_reais_um3 = np.array(volumes_reais_um3)
         
-        # Cálculo de DMV, Dv0.1, Dv0.9 e SPAN
         if num_gotas > 0:
             indices_ordenados = np.argsort(diametros_reais_um)
             diametros_ordenados = diametros_reais_um[indices_ordenados]
@@ -121,84 +115,108 @@ if arquivos_enviados:
         else:
             dv01 = dv05 = dv09 = span = pequenas = medias = grandes = 0.0
             
-        # 6. Coeficiente de Variação (CV %) Espacial
+        # 5. CV Espacial
         quad_h = altura_px // 2
         quad_w = largura_px // 2
         contagem_quadrantes = [0, 0, 0, 0]
-        
         for c in gotas_filtradas:
             M = cv2.moments(c)
             if M["m00"] != 0:
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
-                
-                if cX < quad_w and cY < quad_h:
-                    contagem_quadrantes[0] += 1
-                elif cX >= quad_w and cY < quad_h:
-                    contagem_quadrantes[1] += 1
-                elif cX < quad_w and cY >= quad_h:
-                    contagem_quadrantes[2] += 1
-                else:
-                    contagem_quadrantes[3] += 1
+                if cX < quad_w and cY < quad_h: contagem_quadrantes[0] += 1
+                elif cX >= quad_w and cY < quad_h: contagem_quadrantes[1] += 1
+                elif cX < quad_w and cY >= quad_h: contagem_quadrantes[2] += 1
+                else: contagem_quadrantes[3] += 1
                     
         cv_distribuicao = (np.std(contagem_quadrantes) / np.mean(contagem_quadrantes) * 100) if np.mean(contagem_quadrantes) > 0 else 0.0
 
-        # Alimentar a lista de resultados com o novo cabeçalho completo
+        # Guardar para tabelas e abas
         resultados_gerais.append({
-            "Nome do Arquivo": arquivo.name,
-            "Tipo Detectado": tipo_cartao,
-            "Cobertura (%)": round(porcentagem_cobertura, 2),
-            "Nº de Gotas": num_gotas,
-            "Densidade (gotas/cm²)": round(densidade_gotas, 2),
-            "Dv0.1 (µm)": round(dv01, 1),
-            "Dv0.5 / DMV (µm)": round(dv05, 1),
-            "Dv0.9 (µm)": round(dv09, 1),
-            "Amplitude (SPAN)": round(span, 2),
-            "Gotas Pequenas (<150µm) %": round(pequenas, 1),
-            "Gotas Médias (150-300µm) %": round(medias, 1),
-            "Gotas Grandes (>300µm) %": round(grandes, 1),
+            "Nome do Arquivo": arquivo.name, "Tipo Detectado": tipo_cartao, "Cobertura (%)": round(porcentagem_cobertura, 2),
+            "Nº de Gotas": num_gotas, "Densidade (gotas/cm²)": round(densidade_gotas, 2), "Dv0.1 (µm)": round(dv01, 1),
+            "Dv0.5 / DMV (µm)": round(dv05, 1), "Dv0.9 (µm)": round(dv09, 1), "Amplitude (SPAN)": round(span, 2),
+            "Gotas Pequenas (<150µm) %": round(pequenas, 1), "Gotas Médias (150-300µm) %": round(medias, 1), "Gotas Grandes (>300µm) %": round(grandes, 1),
             "CV da Distribuição (%)": round(cv_distribuicao, 2)
         })
-
-        # 7. Gerar Visualização
+        
+        dados_graficos[arquivo.name] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes]}
+        
+        # Desenhar imagem final
         img_visualizacao = img.copy()
         cv2.drawContours(img_visualizacao, gotas_filtradas, -1, (0, 255, 0), 2)
-        img_visualizacao_rgb = cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB)
+        imagens_processadas[arquivo.name] = {
+            "original": arquivo, "analisada": cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB), "cv_img": img_visualizacao
+        }
+
+    df_geral = pd.DataFrame(resultados_gerais)
+
+    # --- ABA 1: UPLOAD E RESULTADOS ---
+    with aba_upload:
+        st.subheader("📊 Resumo das Métricas Principais")
         
-        _, img_encoded = cv2.imencode('.jpeg', img_visualizacao)
-        img_bytes = img_encoded.tobytes()
-
-        # Janela de Detalhes expandida
-        with st.expander(f"🔍 Detalhes do Cartão [{tipo_cartao}]: {arquivo.name}"):
-            col_img1, col_img2 = st.columns(2)
-            with col_img1:
-                st.image(arquivo, caption="Cartão Enviado", use_container_width=True)
-            with col_img2:
-                st.image(img_visualizacao_rgb, caption="Gotas Detectadas (Verde)", use_container_width=True)
-                st.download_button(
-                    label=f"📥 Baixar Imagem Analisada ({arquivo.name})",
-                    data=img_bytes,
-                    file_name=f"analisado_{arquivo.name}",
-                    mime="image/jpeg"
-                )
+        # Médias consolidadas para os cards do topo
+        media_dmv = df_geral["Dv0.5 / DMV (µm)"].mean()
+        media_densidade = df_geral["Densidade (gotas/cm²)"].mean()
+        media_cobertura = df_geral["Cobertura (%)"].mean()
+        media_cv = df_geral["CV da Distribuição (%)"].mean()
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("DMV Médio Geral", f"{round(media_dmv, 1)} µm")
+        
+        # Card Dinâmico de Densidade (Alvo de exemplo: Fungicida > 60 g/cm²)
+        if media_densidade >= 60:
+            c2.markdown(f"<div style='background-color:#d4edda;padding:10px;border-radius:5px;border-left:5px solid #28a745'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#155724'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#155724'>🟢 Excelente Cobertura</small></div>", unsafe_allow_html=True)
+        else:
+            c2.markdown(f"<div style='background-color:#f8d7da;padding:10px;border-radius:5px;border-left:5px solid #dc3545'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#721c24'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#721c24'>🔴 Baixa Densidade (Ajuste o bico)</small></div>", unsafe_allow_html=True)
             
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("DMV (Dv0.5)", f"{round(dv05, 1)} µm")
-            m2.metric("Densidade", f"{round(densidade_gotas, 1)} g/cm²")
-            m3.metric("SPAN", f"{round(span, 2)}")
-            m4.metric("CV Espacial", f"{round(cv_distribuicao, 1)} %")
+        c3.metric("Cobertura Média", f"{round(media_cobertura, 2)} %")
+        c4.metric("CV Espacial Médio", f"{round(media_cv, 1)} %")
+        
+        st.write("---")
+        st.subheader("📋 Tabela Geral de Resultados")
+        st.dataframe(df_geral, use_container_width=True)
+        
+        csv_formatado = formatar_csv_br(df_geral)
+        st.download_button(
+            label="📥 Baixar Tabela Completa para o Excel (Padrão BR)",
+            data=csv_formatado, file_name="analise_espectro_gotas.csv", mime="text/csv"
+        )
 
-    # --- TABELA DE RESULTADOS GERAIS ---
-    st.write("---")
-    st.subheader("📊 Painel Estatístico Geral")
-    
-    df = pd.DataFrame(resultados_gerais)
-    st.dataframe(df, use_container_width=True)
+    # --- ABA 2: GRÁFICOS DO ESPECTRO ---
+    with aba_graficos:
+        st.subheader("📈 Análise Gráfica Estatística")
+        arquivo_selecionado = st.selectbox("Selecione o cartão para ver os gráficos:", list(dados_graficos.keys()))
+        
+        if arquivo_selecionado:
+            col_g1, col_g2 = st.columns(2)
+            
+            with col_g1:
+                st.markdown("**Distribuição do Tamanho das Gotas (Histograma)**")
+                df_hist = pd.DataFrame({"Diâmetro real (µm)": dados_graficos[arquivo_selecionado]["diametros"]})
+                fig_hist = px.histogram(df_hist, x="Diâmetro real (µm)", nbins=20, color_discrete_sequence=['#1f77b4'])
+                fig_hist.update_layout(yaxis_title="Quantidade de Gotas", showlegend=False)
+                st.plotly_chart(fig_hist, use_container_width=True)
+                
+            with col_g2:
+                st.markdown("**Classificação do Volume de Gotas (Risco de Deriva)**")
+                classes = dados_graficos[arquivo_selecionado]["classes"]
+                labels = ['Pequenas (<150µm) - Deriva', 'Médias (150-300µm) - Ideal', 'Grandes (>300µm) - Escorrimento']
+                fig_pizza = px.pie(values=classes, names=labels, color_discrete_sequence=['#ff7f0e', '#2ca02c', '#d62728'])
+                st.plotly_chart(fig_pizza, use_container_width=True)
 
-    csv_formatado = formatar_csv_br(df)
-    st.download_button(
-        label="📥 Baixar Tabela Completa para o Excel (Padrão BR: separado por ';' com vírgulas)",
-        data=csv_formatado,
-        file_name="analise_espectro_gotas.csv",
-        mime="text/csv"
-    )
+    # --- ABA 3: INSPEÇÃO DE CARTÕES ---
+    with aba_inspecao:
+        st.subheader("🔍 Inspeção Individual de Cartões")
+        for nome_foto, imgs in imagens_processadas.items():
+            with st.expander(f"Cartão: {nome_foto}"):
+                col_i1, col_i2 = st.columns(2)
+                with col_i1:
+                    st.image(imgs["original"], caption="Imagem Enviada", use_container_width=True)
+                with col_i2:
+                    st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
+                    _, img_encoded = cv2.imencode('.jpeg', imgs["cv_img"])
+                    st.download_button(
+                        label=f"📥 Baixar Foto Analisada ({nome_foto})",
+                        data=img_encoded.tobytes(), file_name=f"analisado_{nome_foto}", mime="image/jpeg"
+                    )
