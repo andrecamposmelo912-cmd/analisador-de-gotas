@@ -6,3 +6,4 @@ pillow
 pillow-heif
 fpdf
 plotly
+request
