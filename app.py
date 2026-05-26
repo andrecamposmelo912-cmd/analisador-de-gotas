@@ -18,7 +18,9 @@ st.set_page_config(page_title="Analise Avancada de Gotas", page_icon="💧", lay
 
 # Defina aqui os usuários e senhas autorizados a usar o seu sistema
 USUARIOS_AUTORIZADOS = {
-    "andre": "agro2026",      # Usuário: andre | Senha: agro2026
+    "andre": "iaciac",      # Usuário: andre | Senha: iaciac
+    "manuel": "iaciac",      # Usuário: manuel | Senha: iaciac
+    "hamilton": "iaciac",      # Usuário: hamilton | Senha: iaciac
     "cliente1": "sucesso123"  # Modifique ou adicione mais usuários aqui
 }
 
