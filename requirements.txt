@@ -4,4 +4,5 @@ numpy
 pandas
 pillow
 pillow-heif
-fpdf2
+fpdf
+plotly
