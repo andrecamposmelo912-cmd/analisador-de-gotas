@@ -12,25 +12,77 @@ register_heif_opener()
 
 st.set_page_config(page_title="Analise Avancada de Gotas", page_icon="💧", layout="wide")
 
+# ==============================================================================
+# 🔐 SISTEMA DE CONTROLE DE ACESSO (TELA DE INÍCIO)
+# ==============================================================================
+
+# Defina aqui os usuários e senhas autorizados a usar o seu sistema
+USUARIOS_AUTORIZADOS = {
+    "andre": "agro2026",      # Usuário: andre | Senha: agro2026
+    "cliente1": "sucesso123"  # Modifique ou adicione mais usuários aqui
+}
+
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col_login, _ = st.columns([1, 1])
+    
+    with col_login:
+        st.markdown("## 🔒 Sistema Restrito")
+        st.markdown("Este aplicativo e protegido. Por favor, insira suas credenciais de autorizacao.")
+        
+        usuario_input = st.text_input("Usuário de Acesso:", key="user_login")
+        senha_input = st.text_input("Senha de Segurança:", type="password", key="password_login")
+        
+        botao_entrar = st.button("🔑 Verificar Autorização", use_container_width=True)
+        
+        if botao_entrar:
+            if usuario_input in USUARIOS_AUTORIZADOS and USUARIOS_AUTORIZADOS[usuario_input] == senha_input:
+                st.session_state["autenticado"] = True
+                st.success("Acesso autorizado! Carregando...")
+                st.rerun()
+            else:
+                st.error("❌ Credenciais incorretas ou usuario nao autorizado.")
+                
+    st.stop()
+
+# ==============================================================================
+# 💧 APLICATIVO PRINCIPAL (SÓ EXECUTA SE AUTENTICADO)
+# ==============================================================================
+
+if st.sidebar.button("🚪 Encerrar Sessão (Sair)"):
+    st.session_state["autenticado"] = False
+    st.rerun()
+
 st.title("💧 Analisador de Gotas Inteligente & Consultivo")
 st.markdown("""
 Este software realiza a analise completa do espectro de pulverizacao de cartoes hidrossoluveis.
-Os dados estatisticos sao traduzidos em **diagnosticos de campo faceis de entender**.
+Você pode **tirar a foto direto com a câmera do celular** ou enviar um arquivo salvo.
 """)
 
-# Configuracoes de calibracao na barra lateral
 st.sidebar.header("🛠️ Configuracoes de Calibracao")
-fator_espalhamento = st.sidebar.slider("Fator de Espalhameto (Mancha/Real)", min_value=1.0, max_value=3.0, value=2.0, step=0.1, 
-                                      help="Fator pelo qual a gota aumenta ao impactar o papel. O padrao e 2.0.")
+fator_espalhamento = st.sidebar.slider("Fator de Espalhameto (Mancha/Real)", min_value=1.0, max_value=3.0, value=2.0, step=0.1)
 
 aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
-    "📥 Upload e Resultados", 
+    "📥 Captura e Resultados", 
     "📊 Graficos do Espectro", 
     "🔍 Inspecao de Cartoes",
     "📋 Relatorio Tecnico Didatico"
 ])
 
-arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartoes", type=['jpg', 'jpeg', 'png', 'heic', 'heif'], accept_multiple_files=True)
+with aba_upload:
+    st.subheader("📸 Captura do Cartão Hidrossensível")
+    
+    # Oferece as duas opções para o usuário no campo
+    metodo_captura = st.radio("Escolha como inserir o cartão:", ["Usar a Câmera do Celular", "Enviar foto da Galeria/Arquivo"])
+    
+    arquivo_enviado = None
+    if metodo_captura == "Usar a Câmera do Celular":
+        arquivo_enviado = st.camera_input("Posicione o cartão de forma centralizada e tire a foto")
+    else:
+        arquivo_enviado = st.file_uploader("Selecione a imagem do cartão", type=['jpg', 'jpeg', 'png', 'heic', 'heif'])
 
 def formatar_csv_br(df):
     df_br = df.copy()
@@ -39,35 +91,54 @@ def formatar_csv_br(df):
             df_br[col] = df_br[col].apply(lambda x: f"{x:.4f}".replace('.', ','))
     return df_br.to_csv(index=False, sep=';').encode('utf-8-sig')
 
-if arquivos_enviados:
+if arquivo_enviado:
     resultados_gerais = []
     dados_graficos = {}
     imagens_processadas = {}
     
-    for arquivo in arquivos_enviados:
-        nome_arquivo = arquivo.name
-        extensao = nome_arquivo.split('.')[-1].lower()
-        
-        try:
-            if extensao in ['heic', 'heif']:
-                pil_img = Image.open(arquivo).convert("RGB")
-                img_rgb = np.array(pil_img)
-                img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-                _, img_jpeg_bytes = cv2.imencode('.jpg', img)
-                arquivo_exibicao = io.BytesIO(img_jpeg_bytes.tobytes())
-            else:
-                file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
-                img = cv2.imdecode(file_bytes, 1)
-                arquivo_exibicao = arquivo
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo {nome_arquivo}: {e}")
-            continue
+    nome_arquivo = getattr(arquivo_enviado, 'name', 'captura_camera.jpg')
+    extensao = nome_arquivo.split('.')[-1].lower()
+    
+    try:
+        if extensao in ['heic', 'heif']:
+            pil_img = Image.open(arquivo_enviado).convert("RGB")
+            img_rgb = np.array(pil_img)
+            img_original = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            _, img_jpeg_bytes = cv2.imencode('.jpg', img_original)
+            arquivo_exibicao = io.BytesIO(img_jpeg_bytes.tobytes())
+        else:
+            file_bytes = np.asarray(bytearray(arquivo_enviado.read()), dtype=np.uint8)
+            img_original = cv2.imdecode(file_bytes, 1)
+            arquivo_exibicao = arquivo_enviado
+    except Exception as e:
+        st.error(f"Erro ao processar imagem: {e}")
+        st.stop()
 
-        if img is None:
-            st.error(f"Não foi possível decodificar a imagem: {nome_arquivo}")
-            continue
-            
-        altura_px, largura_px = img.shape[:2]
+    if img_original is not None:
+        # ----------------------------------------------------------------------
+        # 🤖 ALGORITMO DE SCANNER E CORTE AUTOMÁTICO (OPENCV)
+        # ----------------------------------------------------------------------
+        # Converte para tons de cinza e aplica desfoque para ignorar ruídos de fundo
+        gray = cv2.cvtColor(img_original, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Detecção de bordas adaptativa
+        edged = cv2.Canny(blurred, 30, 150)
+        
+        # Encontra contornos na imagem capturada
+        contornos_fundo, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Se encontrar contornos grandes, assume que é o retângulo do cartão e recorta
+        img_focada = img_original.copy()
+        if len(contornos_fundo) > 0:
+            maior_contorno = max(contornos_fundo, key=cv2.contourArea)
+            if cv2.contourArea(maior_contorno) > (img_original.shape[0] * img_original.shape[1] * 0.15):
+                # Obtém a caixa delimitadora do cartão detectado
+                x, y, w, h = cv2.boundingRect(maior_contorno)
+                # Recorta a imagem para focar apenas no cartão, eliminando as bordas inúteis do cenário
+                img_focada = img_original[y:y+h, x:x+w]
+        
+        altura_px, largura_px = img_focada.shape[:2]
         area_total_pixels = altura_px * largura_px
         
         largura_mm = 30.0
@@ -77,8 +148,7 @@ if arquivos_enviados:
         mm_por_pixel = largura_mm / largura_px
         um_por_pixel = mm_por_pixel * 1000.0
         
-        # Inteligencia de Cor (Amarelo ou Branco)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(img_focada, cv2.COLOR_BGR2HSV)
         amostra_hsv = hsv[altura_px//4:3*altura_px//4, largura_px//4:3*largura_px//4]
         tom_medio_h = np.mean(amostra_hsv[:, :, 0])
         tom_medio_s = np.mean(amostra_hsv[:, :, 1])
@@ -97,7 +167,6 @@ if arquivos_enviados:
             azul_alto = np.array([145, 255, 255])
             mascara = cv2.inRange(hsv, azul_baixo, azul_alto)
         
-        # Contornos das Gotas
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
         num_gotas = len(gotas_filtradas)
@@ -106,7 +175,6 @@ if arquivos_enviados:
         porcentagem_cobertura = (pixels_gotas / area_total_pixels) * 100
         densidade_gotas = num_gotas / area_cartao_cm2 if num_gotas > 0 else 0
         
-        # Estatisticas de Diametro e Volume
         diametros_reais_um = []
         volumes_reais_um3 = []
         
@@ -143,7 +211,6 @@ if arquivos_enviados:
         else:
             dv01 = dv05 = dv09 = span = pequenas = medias = grandes = 0.0
             
-        # CV Espacial
         quad_h = altura_px // 2
         quad_w = largura_px // 2
         contagem_quadrantes = [0, 0, 0, 0]
@@ -169,16 +236,16 @@ if arquivos_enviados:
         
         dados_graficos[nome_arquivo] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes]}
         
-        img_visualizacao = img.copy()
+        img_visualizacao = img_focada.copy()
         cv2.drawContours(img_visualizacao, gotas_filtradas, -1, (0, 255, 0), 2)
         imagens_processadas[nome_arquivo] = {
-            "original": arquivo_exibicao, "analisada": cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB), "cv_img": img_visualizacao
+            "original": arquivo_exibicao, "analisada": cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB)
         }
 
     df_geral = pd.DataFrame(resultados_gerais)
 
-    # --- ABA 1: UPLOAD E RESULTADOS ---
     with aba_upload:
+        st.write("---")
         st.subheader("📊 Resumo das Metricas Principais")
         media_dmv = df_geral["Dv0.5 / DMV (µm)"].mean()
         media_densidade = df_geral["Densidade (gotas/cm²)"].mean()
@@ -189,9 +256,9 @@ if arquivos_enviados:
         c1.metric("DMV Medio Geral", f"{round(media_dmv, 1)} um")
         
         if media_densidade >= 60:
-            st.success(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🟢 Ideal")
+            c2.success(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🟢 Ideal")
         else:
-            st.error(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🔴 Baixa")
+            c2.error(f"Densidade Média: {round(media_densidade, 1)} g/cm²\n\n🔴 Baixa")
             
         c3.metric("Cobertura Media", f"{round(media_cobertura, 2)} %")
         c4.metric("CV Espacial Medio", f"{round(media_cv, 1)} %")
@@ -206,50 +273,39 @@ if arquivos_enviados:
             data=csv_formatado, file_name="analise_espectro_gotas.csv", mime="text/csv"
         )
 
-    # --- ABA 2: GRAFICOS DO ESPECTRO ---
     with aba_graficos:
         st.subheader(" Análise Grafica Estatistica")
-        arquivo_selecionado = st.selectbox("Selecione o cartão para ver os gráficos:", list(dados_graficos.keys()))
-        if arquivo_selecionado:
+        if nome_arquivo in dados_graficos:
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.markdown("**Frequencia de Tamanho das Gotas (Histograma Nativo)**")
-                counts, bins = np.histogram(dados_graficos[arquivo_selecionado]["diametros"], bins=15)
+                counts, bins = np.histogram(dados_graficos[nome_arquivo]["diametros"], bins=15)
                 df_hist_nativo = pd.DataFrame({"Quantidade": counts}, index=bins[:-1].astype(int))
                 st.bar_chart(df_hist_nativo)
                 
             with col_g2:
                 st.markdown("**Distribuicao de Classes de Gotas (%)**")
-                classes = dados_graficos[arquivo_selecionado]["classes"]
+                classes = dados_graficos[nome_arquivo]["classes"]
                 df_classes_nativo = pd.DataFrame({
                     "Percentual (%)": classes
                 }, index=['Pequenas (<150um)', 'Medias (150-300um)', 'Grandes (>300um)'])
                 st.bar_chart(df_classes_nativo)
 
-    # --- ABA 3: INSPECAO DE CARTOES ---
     with aba_inspecao:
-        st.subheader("🔍 Inspecao Individual de Cartoes")
-        for nome_foto, imgs in imagens_processadas.items():
-            with st.expander(f"Cartão: {nome_foto}"):
-                col_i1, col_i2 = st.columns(2)
-                with col_i1:
-                    st.image(imgs["original"], caption="Imagem Original", use_container_width=True)
-                with col_i2:
-                    st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
+        st.subheader("🔍 Detecção de Bordas & Isolamento do Cartão")
+        if nome_arquivo in imagens_processadas:
+            col_i1, col_i2 = st.columns(2)
+            with col_i1:
+                st.image(imagens_processadas[nome_arquivo]["original"], caption="Foto Enviada (Entrada)", use_container_width=True)
+            with col_i2:
+                st.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil Isolada + Gotas (Em Verde)", use_container_width=True)
 
-    # --- ABA 4: RELATORIO TECNICO DIDATICO ---
     with aba_relatorio:
         st.markdown("## 📋 Laudo de Campo e Recomendacoes de Pulverizacao")
         st.markdown("---")
         
-        cartao_relatorio = st.selectbox(
-            "Selecione o cartão para gerar o Laudo:", 
-            list(dados_graficos.keys()), 
-            key="rel_select"
-        )
-        
-        if cartao_relatorio:
-            dados_cartao = df_geral[df_geral["Nome do Arquivo"] == cartao_relatorio].iloc[0]
+        if nome_arquivo in dados_graficos:
+            dados_cartao = df_geral[df_geral["Nome do Arquivo"] == nome_arquivo].iloc[0]
             
             dmv_atual = dados_cartao["Dv0.5 / DMV (µm)"]
             densidade_atual = dados_cartao["Densidade (gotas/cm²)"]
@@ -257,7 +313,6 @@ if arquivos_enviados:
             span_atual = dados_cartao["Amplitude (SPAN)"]
             cobertura_atual = dados_cartao["Cobertura (%)"]
             
-            # Classificacao do DMV
             if dmv_atual < 100:
                 classe_gota = "Muito Fina"
                 interpretacao_dmv = "Risco critico de evaporacao e perda de produto antes de tocar o alvo."
@@ -274,8 +329,7 @@ if arquivos_enviados:
                 classe_gota = "Muito Grossa"
                 interpretacao_dmv = "Risco elevado de escorrimento do produto nas folhas."
 
-            # Exibicao dos Blocos Informativos Nativos
-            st.markdown(f"### Diagnóstico do Cartão: {cartao_relatorio}")
+            st.markdown(f"### Diagnóstico da Amostra Atual")
             
             col_card1, col_card2, col_card3 = st.columns(3)
             with col_card1:
@@ -297,12 +351,10 @@ if arquivos_enviados:
             st.write("")
             col_card4, col_card5 = st.columns(2)
             with col_card4:
-                st.info(f"Uniformidade (SPAN): {span_atual}\n\n" + 
-                        ("Espectro homogeneo." if span_atual <= 1.2 else "Alta variacao de tamanhos."))
+                st.info(f"Uniformidade (SPAN): {span_atual}\n\n" + ("Espectro homogeneo." if span_atual <= 1.2 else "Alta variacao de tamanhos."))
             with col_card5:
                 st.info(f"Cobertura Real da Calda: {cobertura_atual}% do cartao atingido.")
 
-            # Recomendacoes
             if deriva_atual > 30:
                 rec_deriva = "Risco de Deriva Elevado: Reduza ligeiramente a pressao ou use bicos com inducao de ar."
             else:
@@ -315,19 +367,14 @@ if arquivos_enviados:
 
             st.write("---")
             st.markdown("### 💡 Plano de Ação Recomendado")
-            st.warning(f"""
-            Orizentacoes praticas para o operador:
-            1. {rec_deriva}
-            2. {rec_densidade}
-            """)
+            st.warning(f"Orizentacoes praticas para o operador:\n\n1. {rec_deriva}\n\n2. {rec_densidade}")
 
-            # --- ENGINE CORRIGIDA DE GERACAO DO PDF (FPDF2) ---
+            # --- ENGINE DE GERACAO DO PDF ---
             def gerar_pdf_laudo():
                 pdf = FPDF()
                 pdf.add_page()
                 pdf.set_margins(15, 15, 15)
                 
-                # Cabeçalho
                 pdf.set_fill_color(31, 119, 180)
                 pdf.rect(0, 0, 210, 35, 'F')
                 
@@ -335,10 +382,9 @@ if arquivos_enviados:
                 pdf.set_text_color(255, 255, 255)
                 pdf.cell(0, 10, "LAUDO DE AVALIACAO DA QUALIDADE DE APLICACAO", ln=True, align="C")
                 pdf.set_font("Arial", "", 10)
-                pdf.cell(0, 5, f"Amostra: {cartao_relatorio}", ln=True, align="C")
+                pdf.cell(0, 5, "Relatorio de Campo Digitializado", ln=True, align="C")
                 pdf.ln(15)
                 
-                # Tabela
                 pdf.set_text_color(0, 0, 0)
                 pdf.set_font("Arial", "B", 12)
                 pdf.cell(0, 10, "1. Resultados do Espectro", ln=True)
@@ -372,7 +418,6 @@ if arquivos_enviados:
                 pdf.cell(95, 8, "Area coberta no papel", border=1)
                 pdf.ln(15)
                 
-                # Recomendacoes
                 pdf.set_font("Arial", "B", 12)
                 pdf.cell(0, 10, "2. Plano de Acao", ln=True)
                 pdf.ln(2)
@@ -384,21 +429,18 @@ if arquivos_enviados:
                 texto_pdf = f"Recomendacoes de Campo:\n\n- {rec_deriva}\n\n- {rec_densidade}"
                 pdf.multi_cell(180, 6, texto_pdf, border=1, fill=True)
                 
-                # CORREÇÃO CIRÚRGICA: Força a saída para string de bytes bruta latente ('S')
-                # e faz o cast definitivo para bytes aceitos pelo Streamlit
                 pdf_output_str = pdf.output(dest='S')
                 if isinstance(pdf_output_str, str):
                     return pdf_output_str.encode('latin1')
                 return bytes(pdf_output_str)
 
-            # Executa a função e obtém a sequência limpa de bytes
             pdf_bytes = gerar_pdf_laudo()
             
             st.write("")
             st.download_button(
                 label="📥 Baixar Laudo de Campo em PDF",
                 data=pdf_bytes,
-                file_name=f"Laudo_Tecnico_{cartao_relatorio.split('.')[0]}.pdf",
+                file_name="Laudo_Tecnico_Campo.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
