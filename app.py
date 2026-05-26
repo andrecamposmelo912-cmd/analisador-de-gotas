@@ -56,7 +56,7 @@ def salvar_analise_bd(arquivo, tipo, cob, gotas, dens, dmv, span, classe):
 inicializar_banco()
 
 # ==============================================================================
-# 🖼️ CONFIGURAÇÃO DOS LOGOTIPOS LOCAIS
+# 🖼️ CONFIGURAÇÃO DOS LOGOTIPOS LOCAIS (RAIZ DO REPOSITÓRIO)
 # ==============================================================================
 CAMINHO_LOGO_IAC = "logo_iac.png.png" 
 CAMINHO_LOGO_APLIQUEBEM = "logo_aplique.png.jpg"
@@ -190,7 +190,7 @@ if arquivo_enviado:
             file_bytes = np.asarray(bytearray(arquivo_enviado.read()), dtype=np.uint8)
             img_original = cv2.imdecode(file_bytes, 1)
     except Exception as e:
-        st.error(f"Erro: {e}"); st.stop()
+        st.error(f"Erro no processamento da imagem: {e}"); st.stop()
 
     if img_original is not None:
         gray = cv2.cvtColor(img_original, cv2.COLOR_BGR2GRAY)
@@ -368,7 +368,6 @@ if arquivo_enviado:
         grandes_atual = dados_cartao["Gotas Grandes (>300µm) %"]
         span_atual = dados_cartao["Amplitude (SPAN)"]
         cobertura_atual = dados_cartao["Cobertura (%)"]
-        cv_global = dados_cartao["CV da Distribuição (%)"]
         
         rec_deriva = "Risco de Deriva Elevado: Ajuste os bicos." if deriva_atual > 30 else "Controle de Deriva Eficiente."
         rec_densidade = "Densidade Insuficiente: Verifique o volume de calda." if densidade_atual < 60 else "Densidade Excelente."
@@ -388,6 +387,7 @@ if arquivo_enviado:
             pdf.set_font("Arial", "I", 9)
             pdf.cell(0, 5, "Homologacao Tecnica Operacional: IAC & Programa Aplique Bem", ln=True, align="C")
             
+            # Busca logotipos da raiz do diretório ativo
             if os.path.exists(CAMINHO_LOGO_IAC): pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
             if os.path.exists(CAMINHO_LOGO_APLIQUEBEM): pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
             
@@ -402,9 +402,9 @@ if arquivo_enviado:
             pdf.set_font("Arial", "", 9.5)
             
             if dados_clima:
-                texto_clima = f"Localidade informada: {dados_clima['local']}   |   Temperatura: {dados_clima['temp']} degC\nUmidade Relativa (UR): {dados_clima['uhr']}%   |   Velocidade do Vento: {dados_clima['vento']} km/h"
+                texto_clima = f"Localidade informada: {dados_clima['local']}   |   Temperatura: {dados_clima['temp']} C\nUmidade Relativa (UR): {dados_clima['uhr']}%   |   Velocidade do Vento: {dados_clima['vento']} km/h"
             else:
-                texto_clima = f"Localidade informada: {cidade_campo} (Dados de satelite nao carregados no momento da impressao)."
+                texto_clima = f"Localidade informada: {cidade_campo} (Dados de satelite nao carregados no momento)."
             pdf.multi_cell(180, 5, texto_clima, border=1)
             
             # --- CARDS DE METRICAS ---
@@ -433,21 +433,19 @@ if arquivo_enviado:
                 pdf.text(pos_x + 4, pdf.get_y() + 15, f"Status: {ind['status']}")
                 pos_x += 62
             
-            # --- SEÇÃO MODELAGEM 3D INSERIDA ---
+            # --- SEÇÃO MODELAGEM 3D ---
             pdf.set_y(122)
             pdf.set_text_color(40, 50, 60)
             pdf.set_font("Arial", "B", 11)
             pdf.cell(0, 6, "3. Projecao Computacional 3D (Efeito Fator Espalhamento)", ln=True)
             pdf.ln(2)
             
-            # Exportando os graficos do Plotly para imagens temporarias usando o Kaleido
             tmp_sph = "tmp_sph.png"
             tmp_imp = "tmp_imp.png"
             fig_sph.write_image(tmp_sph, width=500, height=400, scale=2)
             fig_imp.write_image(tmp_imp, width=500, height=400, scale=2)
             
             y_grafico = pdf.get_y()
-            # Desenha os dois graficos lado a lado
             pdf.image(tmp_sph, x=15, y=y_grafico, w=88, h=65)
             pdf.image(tmp_imp, x=107, y=y_grafico, w=88, h=65)
             
@@ -468,7 +466,7 @@ if arquivo_enviado:
             pdf.set_fill_color(255, 251, 230)
             pdf.set_text_color(90, 70, 10)
             pdf.set_font("Arial", "", 9)
-            texto_quadro = f"Recomendacoes Técnicas:\n[DERIVA] -> {rec_deriva}\n[DENSIDADE] -> {rec_densidade}"
+            texto_quadro = f"Recomendacoes Tecnicas:\n[DERIVA] -> {rec_deriva}\n[DENSIDADE] -> {rec_densidade}"
             pdf.multi_cell(180, 5, texto_quadro, border=1, fill=True)
             
             # --- CARTÃO HORIZONTAL ---
@@ -492,12 +490,13 @@ if arquivo_enviado:
             pdf.set_text_color(140, 140, 140)
             pdf.cell(0, 4, "Algoritmo Computacional de Calibracao Hidrossensivel IAC / Aplique Bem 2026.", ln=True, align="C")
 
-            return pdf.output(dest='S')
+            # CORREÇÃO DO ERRO DO STREAMLIT CLOUD: Codifica a string gerada para bytes puros (latin1)
+            return pdf.output(dest='S').encode('latin1')
 
-        pdf_b = gerar_pdf_laudo_grafico()
+        pdf_bytes = gerar_pdf_laudo_grafico()
         st.download_button(
             label="🚀 GERAR LAUDO COMPLETO COM GRÁFICOS 3D E CLIMA (PDF)",
-            data=bytes(pdf_b),
+            data=pdf_bytes,
             file_name=f"Laudo_Completo_3D_{nome_arquivo.split('.')[0]}.pdf",
             mime="application/pdf",
             use_container_width=True
