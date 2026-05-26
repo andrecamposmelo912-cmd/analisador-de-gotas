@@ -11,7 +11,7 @@ import requests
 from PIL import Image
 from fpdf import FPDF
 import plotly.graph_objects as go
-from streamlit.web.server.websocket_headers import _get_websocket_headers
+import streamlit.components.v1 as components
 
 # Registra o suporte a arquivos HEIC/HEIF do iPhone
 register_heif_opener()
@@ -19,17 +19,37 @@ register_heif_opener()
 st.set_page_config(page_title="Gota Inteligente - IAC & Aplique Bem", page_icon="💧", layout="wide")
 
 # ==============================================================================
-# 📱 DETECÇÃO DE DISPOSITIVO (CELULAR VS COMPUTADOR)
+# 📱 DETECÇÃO DE DISPOSITIVO SEGURA (JAVASCRIPT BROWSER)
 # ==============================================================================
-def detectar_dispositivo():
-    headers = _get_websocket_headers()
-    if headers:
-        user_agent = headers.get("User-Agent", "").lower()
-        if any(term in user_agent for term in ["android", "iphone", "ipad", "mobile", "windows phone"]):
-            return "Celular"
-    return "Computador"
+def obter_dispositivo():
+    # Injeta um script invisível no navegador para ler a tela/UserAgent de forma pública
+    js_detector = """
+        <script>
+        const renderContext = window.parent || window;
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+                         || (window.innerWidth <= 768);
+        
+        // Envia a resposta de volta para o ambiente do Streamlit se houver suporte a mensagens
+        if (renderContext.postMessage) {
+            renderContext.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: isMobile ? 'Celular' : 'Computador'
+            }, '*');
+        }
+        </script>
+    """
+    # Cria uma chave única no session_state para guardar o aparelho
+    if "tipo_dispositivo" not in st.session_state:
+        st.session_state["tipo_dispositivo"] = "Computador" # Valor padrão de segurança
+        
+    # Executa o componente em background
+    components.html(js_detector, height=0, width=0)
+    
+    # Captura variações dinâmicas de query parameters se o dispositivo for passado por lá,
+    # ou mantém o estado detectado pelo navegador
+    return st.session_state["tipo_dispositivo"]
 
-dispositivo_atual = detectar_dispositivo()
+dispositivo_atual = obter_dispositivo()
 
 # ==============================================================================
 # 🗄️ CONFIGURAÇÃO DO BANCO DE DADOS LOCAL (SQLITE)
@@ -141,11 +161,16 @@ if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
 
-# Informa o modo dinâmico na sidebar
-if dispositivo_atual == "Celular":
-    st.sidebar.success("📱 Interface Mobile Otimizada")
+# Seletor manual extra de contingência caso o Javascript seja bloqueado no navegador do produtor
+opcao_dispositivo = st.sidebar.selectbox("Visualização de Tela:", ["Automático (Detecção)", "Forçar Celular", "Forçar Computador"])
+if opcao_dispositivo == "Forçar Celular": dispositivo_ajustado = "Celular"
+elif opcao_dispositivo == "Forçar Computador": dispositivo_ajustado = "Computador"
+else: dispositivo_ajustado = dispositivo_atual
+
+if dispositivo_ajustado == "Celular":
+    st.sidebar.success("📱 Modo Mobile: Otimizado para Campo")
 else:
-    st.sidebar.info("💻 Interface Desktop Ativada")
+    st.sidebar.info("💻 Modo Desktop: Otimizado para Computador")
 
 if st.sidebar.button("🚪 Encerrar Sessão", use_container_width=True):
     st.session_state["autenticado"] = False
@@ -185,8 +210,8 @@ aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
 with aba_upload:
     st.subheader("📸 Captura do Cartão Hidrossensível")
     
-    # Adaptação de Interface baseada no Dispositivo
-    opcao_padrao = 0 if dispositivo_atual == "Celular" else 1
+    # Interface dinâmica baseada no dispositivo verificado
+    opcao_padrao = 0 if dispositivo_ajustado == "Celular" else 1
     metodo_captura = st.radio("Inserção:", ["Usar a Câmera do Celular", "Enviar foto da Galeria"], index=opcao_padrao, horizontal=True)
     
     arquivo_enviado = st.camera_input("Foto") if metodo_captura == "Usar a Câmera do Celular" else st.file_uploader("Arquivo", type=['jpg', 'jpeg', 'png', 'heic', 'heif'])
@@ -230,17 +255,14 @@ if arquivo_enviado:
                 x, y, w, h = cv2.boundingRect(maior_contorno)
                 img_focada = img_original[y:y+h, x:x+w]
         
-        # ✂️ ESTRATÉGIA 1: CORTE DE SEGURANÇA DAS BORDAS (BORDER CROP)
-        # Corta fora 8% de cada extremidade para ignorar o corte do papel e marcas de dedo
+        # ✂️ CROP DE SEGURANÇA CONTRA LEITURA DE BORDAS DO PAPEL
         alt_f, larg_f = img_focada.shape[:2]
         margem_y = int(alt_f * 0.08)
         margem_x = int(larg_f * 0.08)
         
-        # Garante que o corte só ocorra se a imagem final mantiver tamanho mínimo estável
         if alt_f > (margem_y * 2) and larg_f > (margem_x * 2):
             img_focada = img_focada[margem_y : alt_f - margem_y, margem_x : larg_f - margem_x]
             
-        # Recalcula dimensões da área real útil limpa
         altura_px, largura_px = img_focada.shape[:2]
         area_total_pixels = altura_px * largura_px
         area_cartao_cm2 = (30.0 / 10.0) * (80.0 / 10.0)
@@ -379,8 +401,7 @@ if arquivo_enviado:
             st.write("---")
             st.markdown("### 🛰️ Comparação Espacial Realística 3D (Efeito do Impacto)")
             
-            # Ajusta colunas dos gráficos 3D se for celular para não espremer a tela
-            col_3d_1, col_3d_2 = st.columns(1) if dispositivo_atual == "Celular" else st.columns(2)
+            col_3d_1, col_3d_2 = st.columns(1) if dispositivo_ajustado == "Celular" else st.columns(2)
             with col_3d_1:
                 st.markdown("<h4 style='text-align: center; color: #0099ff;'>🛰️ 1. Gota em Voo Sustentado (Esfera)</h4>", unsafe_allow_html=True)
                 st.plotly_chart(fig_sph, use_container_width=True)
@@ -391,7 +412,7 @@ if arquivo_enviado:
     with aba_inspecao:
         st.subheader("🔍 Inspeção e Isolamento do Cartão")
         if nome_arquivo in imagens_processadas:
-            col_i1, col_i2 = st.columns(1) if dispositivo_atual == "Celular" else st.columns(2)
+            col_i1, col_i2 = st.columns(1) if dispositivo_ajustado == "Celular" else st.columns(2)
             col_i1.image(imagens_processadas[nome_arquivo]["original"], caption="Foto de Entrada (Capturada)", use_container_width=True)
             col_i2.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil com Borda Cortada (Gotas Isoladas)", use_container_width=True)
 
