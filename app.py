@@ -54,22 +54,18 @@ if arquivos_enviados:
         tom_medio_h = np.mean(amostra_hsv[:, :, 0])
         tom_medio_s = np.mean(amostra_hsv[:, :, 1])
         
-        # Se tiver alta saturação e tom na faixa do amarelo (geralmente entre 15 e 40 no OpenCV)
+        # Se tiver alta saturação e tom na faixa do amarelo
         if 15 <= tom_medio_h <= 45 and tom_medio_s > 60:
             tipo_cartao = "Original (Amarelo)"
-            # Captura o fundo amarelo bem vivo
             amarelo_baixo = np.array([15, 50, 40])
             amarelo_alto = np.array([45, 255, 255])
             mascara_fundo = cv2.inRange(hsv, amarelo_baixo, amarelo_alto)
-            # As gotas são tudo o que NÃO é o fundo amarelo
             mascara = cv2.bitwise_not(mascara_fundo)
             
-            # Limpeza de bordas/ruídos gerados pelo fundo texturizado do cartão amarelo
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
             mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
         else:
             tipo_cartao = "Revelado (Branco)"
-            # Filtro padrão para o azul celeste no fundo branco
             azul_baixo = np.array([85, 40, 40])
             azul_alto = np.array([145, 255, 255])
             mascara = cv2.inRange(hsv, azul_baixo, azul_alto)
@@ -77,7 +73,7 @@ if arquivos_enviados:
         # 3. Detecção de Contornos (Gotas)
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Filtrar ruídos micro (menores que 3 pixels de área para evitar poeira do papel amarelo)
+        # Filtrar ruídos micro
         gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
         num_gotas = len(gotas_filtradas)
         
@@ -86,7 +82,7 @@ if arquivos_enviados:
         porcentagem_cobertura = (pixels_gotas / area_total_pixels) * 100
         densidade_gotas = num_gotas / area_cartao_cm2 if num_gotas > 0 else 0
         
-        # 5. Análise Estatística do Espectro de Gotas (Diâmetros e Volumes)
+        # 5. Análise Estatística do Espectro de Gotas
         diametros_reais_um = []
         volumes_reais_um3 = []
         
@@ -104,7 +100,7 @@ if arquivos_enviados:
         diametros_reais_um = np.array(diametros_reais_um)
         volumes_reais_um3 = np.array(volumes_reais_um3)
         
-        # Cálculo de DMV (Dv0.5), Dv0.1, Dv0.9
+        # Cálculo de DMV, Dv0.1, Dv0.9 e SPAN
         if num_gotas > 0:
             indices_ordenados = np.argsort(diametros_reais_um)
             diametros_ordenados = diametros_reais_um[indices_ordenados]
@@ -115,18 +111,17 @@ if arquivos_enviados:
             fracao_acumulada = volume_acumulado / volume_total
             
             dv01 = float(np.interp(0.1, fracao_acumulada, diametros_ordenados))
-            dv05 = float(np.interp(0.5, fracao_acumulada, diametros_ordenados)) # DMV
+            dv05 = float(np.interp(0.5, fracao_acumulada, diametros_ordenados))
             dv09 = float(np.interp(0.9, fracao_acumulada, diametros_ordenados))
             span = (dv09 - dv01) / dv05 if dv05 > 0 else 0
             
-            # Classificação de tamanho (% em relação à contagem total de gotas)
             pequenas = np.sum(diametros_reais_um < 150) / num_gotas * 100
             medias = np.sum((diametros_reais_um >= 150) & (diametros_reais_um <= 300)) / num_gotas * 100
             grandes = np.sum(diametros_reais_um > 300) / num_gotas * 100
         else:
             dv01 = dv05 = dv09 = span = pequenas = medias = grandes = 0.0
             
-        # 6. Coeficiente de Variação (CV %) usando 4 quadrantes (2x2)
+        # 6. Coeficiente de Variação (CV %) Espacial
         quad_h = altura_px // 2
         quad_w = largura_px // 2
         contagem_quadrantes = [0, 0, 0, 0]
@@ -148,7 +143,7 @@ if arquivos_enviados:
                     
         cv_distribuicao = (np.std(contagem_quadrantes) / np.mean(contagem_quadrantes) * 100) if np.mean(contagem_quadrantes) > 0 else 0.0
 
-        # Guardar métricas na tabela geral
+        # Alimentar a lista de resultados com o novo cabeçalho completo
         resultados_gerais.append({
             "Nome do Arquivo": arquivo.name,
             "Tipo Detectado": tipo_cartao,
@@ -165,16 +160,15 @@ if arquivos_enviados:
             "CV da Distribuição (%)": round(cv_distribuicao, 2)
         })
 
-        # 7. Gerar Imagem de Visualização com contornos verdes nas gotas
+        # 7. Gerar Visualização
         img_visualizacao = img.copy()
         cv2.drawContours(img_visualizacao, gotas_filtradas, -1, (0, 255, 0), 2)
         img_visualizacao_rgb = cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB)
         
-        # Preparar imagem processada para download direto
         _, img_encoded = cv2.imencode('.jpeg', img_visualizacao)
         img_bytes = img_encoded.tobytes()
 
-        # Exibição detalhada por cartão
+        # Janela de Detalhes expandida
         with st.expander(f"🔍 Detalhes do Cartão [{tipo_cartao}]: {arquivo.name}"):
             col_img1, col_img2 = st.columns(2)
             with col_img1:
@@ -188,7 +182,6 @@ if arquivos_enviados:
                     mime="image/jpeg"
                 )
             
-            # Métricas rápidas em cards informativos
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("DMV (Dv0.5)", f"{round(dv05, 1)} µm")
             m2.metric("Densidade", f"{round(densidade_gotas, 1)} g/cm²")
@@ -202,9 +195,7 @@ if arquivos_enviados:
     df = pd.DataFrame(resultados_gerais)
     st.dataframe(df, use_container_width=True)
 
-    # Exportação formatada para o Excel do Brasil (; e ,)
     csv_formatado = formatar_csv_br(df)
-    
     st.download_button(
         label="📥 Baixar Tabela Completa para o Excel (Padrão BR: separado por ';' com vírgulas)",
         data=csv_formatado,
