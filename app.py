@@ -3,8 +3,12 @@ import cv2
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import piheif
+from pillow_heif import register_heif_opener
 import io
+from PIL import Image
+
+# Registra o suporte a arquivos HEIC/HEIF na biblioteca de imagens
+register_heif_opener()
 
 st.set_page_config(page_title="Análise Avançada de Gotas", page_icon="💧", layout="wide")
 
@@ -21,7 +25,6 @@ fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", mi
 
 aba_upload, aba_graficos, aba_inspecao = st.tabs(["📥 Upload e Resultados", "📊 Gráficos do Espectro", "🔍 Inspeção de Cartões"])
 
-# Adicionado 'heic' e 'heif' nos tipos aceitos pelo uploader
 arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartões", type=['jpg', 'jpeg', 'png', 'heic', 'heif'], accept_multiple_files=True)
 
 def formatar_csv_br(df):
@@ -40,23 +43,17 @@ if arquivos_enviados:
         nome_arquivo = arquivo.name
         extensao = nome_arquivo.split('.')[-1].lower()
         
-        # --- CONVERSOR INTELIGENTE DE HEIC ---
         try:
             if extensao in ['heic', 'heif']:
-                # Lê o arquivo HEIC usando piheif
-                heif_file = piheif.read(arquivo.read())
-                # Converte os bytes brutos para um array manipulável
-                image_pixel_data = heif_file.data
-                # Cria a imagem no formato RGB correto
-                img_rgb = np.frombuffer(image_pixel_data, dtype=np.uint8).reshape(heif_file.size[1], heif_file.size[0], 3)
-                # Converte para BGR porque o OpenCV trabalha assim por padrão
+                # Abre a imagem HEIC de forma nativa e segura usando a Pillow convertida para RGB
+                pil_img = Image.open(arquivo).convert("RGB")
+                img_rgb = np.array(pil_img)
+                # Converte para BGR para o OpenCV trabalhar
                 img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
                 
-                # Prepara um arquivo simulado em JPEG para exibição na aba de inspeção
                 _, img_jpeg_bytes = cv2.imencode('.jpg', img)
                 arquivo_exibicao = io.BytesIO(img_jpeg_bytes.tobytes())
             else:
-                # Processamento padrão para JPG, JPEG e PNG
                 file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
                 img = cv2.imdecode(file_bytes, 1)
                 arquivo_exibicao = arquivo
@@ -78,7 +75,7 @@ if arquivos_enviados:
         mm_por_pixel = largura_mm / largura_px
         um_por_pixel = mm_por_pixel * 1000.0
         
-        # 2. Inteligência de Cor (Amarelo ou Branco)
+        # Inteligência de Cor (Amarelo ou Branco)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         amostra_hsv = hsv[altura_px//4:3*altura_px//4, largura_px//4:3*largura_px//4]
         tom_medio_h = np.mean(amostra_hsv[:, :, 0])
@@ -98,7 +95,7 @@ if arquivos_enviados:
             azul_alto = np.array([145, 255, 255])
             mascara = cv2.inRange(hsv, azul_baixo, azul_alto)
         
-        # 3. Contornos das Gotas
+        # Contornos das Gotas
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
         num_gotas = len(gotas_filtradas)
@@ -107,7 +104,7 @@ if arquivos_enviados:
         porcentagem_cobertura = (pixels_gotas / area_total_pixels) * 100
         densidade_gotas = num_gotas / area_cartao_cm2 if num_gotas > 0 else 0
         
-        # 4. Estatísticas de Diâmetro e Volume
+        # Estatísticas de Diâmetro e Volume
         diametros_reais_um = []
         volumes_reais_um3 = []
         
@@ -144,7 +141,7 @@ if arquivos_enviados:
         else:
             dv01 = dv05 = dv09 = span = pequenas = medias = grandes = 0.0
             
-        # 5. CV Espacial
+        # CV Espacial
         quad_h = altura_px // 2
         quad_w = largura_px // 2
         contagem_quadrantes = [0, 0, 0, 0]
@@ -160,7 +157,6 @@ if arquivos_enviados:
                     
         cv_distribuicao = (np.std(contagem_quadrantes) / np.mean(contagem_quadrantes) * 100) if np.mean(contagem_quadrantes) > 0 else 0.0
 
-        # Guardar dados
         resultados_gerais.append({
             "Nome do Arquivo": nome_arquivo, "Tipo Detectado": tipo_cartao, "Cobertura (%)": round(porcentagem_cobertura, 2),
             "Nº de Gotas": num_gotas, "Densidade (gotas/cm²)": round(densidade_gotas, 2), "Dv0.1 (µm)": round(dv01, 1),
