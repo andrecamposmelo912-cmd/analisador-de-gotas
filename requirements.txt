@@ -3,3 +3,4 @@ opencv-python-headless
 pandas
 plotly
 pillow-heif
+fpdf2
