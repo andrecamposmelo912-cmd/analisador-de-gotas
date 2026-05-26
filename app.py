@@ -3,14 +3,15 @@ import cv2
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import piheif
+import io
 
 st.set_page_config(page_title="Análise Avançada de Gotas", page_icon="💧", layout="wide")
 
 st.title("💧 Analisador Avançado de Papel Hidrossolúvel")
 st.markdown("""
 Este aplicativo realiza a análise completa do espectro de pulverização de cartões hidrossolúveis (**8cm x 3cm**).
-Suporta **cartões revelados (fundo branco)** e **cartões originais (fundo amarelo)** sem necessidade de éter.
+Suporta **cartões revelados (fundo branco)**, **cartões originais (fundo amarelo)** e imagens de **iPhone (.HEIC)**.
 """)
 
 # Configurações de calibração na barra lateral
@@ -18,10 +19,10 @@ st.sidebar.header("🛠️ Configurações de Calibração")
 fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", min_value=1.0, max_value=3.0, value=2.0, step=0.1, 
                                       help="Fator pelo qual a gota aumenta ao impactar o papel. O padrão de mercado é 2.0.")
 
-# Criando as abas na interface
 aba_upload, aba_graficos, aba_inspecao = st.tabs(["📥 Upload e Resultados", "📊 Gráficos do Espectro", "🔍 Inspeção de Cartões"])
 
-arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartões", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
+# Adicionado 'heic' e 'heif' nos tipos aceitos pelo uploader
+arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartões", type=['jpg', 'jpeg', 'png', 'heic', 'heif'], accept_multiple_files=True)
 
 def formatar_csv_br(df):
     df_br = df.copy()
@@ -36,9 +37,37 @@ if arquivos_enviados:
     imagens_processadas = {}
     
     for arquivo in arquivos_enviados:
-        # 1. Ler imagem
-        file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
-        img = cv2.imdecode(file_bytes, 1)
+        nome_arquivo = arquivo.name
+        extensao = nome_arquivo.split('.')[-1].lower()
+        
+        # --- CONVERSOR INTELIGENTE DE HEIC ---
+        try:
+            if extensao in ['heic', 'heif']:
+                # Lê o arquivo HEIC usando piheif
+                heif_file = piheif.read(arquivo.read())
+                # Converte os bytes brutos para um array manipulável
+                image_pixel_data = heif_file.data
+                # Cria a imagem no formato RGB correto
+                img_rgb = np.frombuffer(image_pixel_data, dtype=np.uint8).reshape(heif_file.size[1], heif_file.size[0], 3)
+                # Converte para BGR porque o OpenCV trabalha assim por padrão
+                img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+                
+                # Prepara um arquivo simulado em JPEG para exibição na aba de inspeção
+                _, img_jpeg_bytes = cv2.imencode('.jpg', img)
+                arquivo_exibicao = io.BytesIO(img_jpeg_bytes.tobytes())
+            else:
+                # Processamento padrão para JPG, JPEG e PNG
+                file_bytes = np.asarray(bytearray(arquivo.read()), dtype=np.uint8)
+                img = cv2.imdecode(file_bytes, 1)
+                arquivo_exibicao = arquivo
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo {nome_arquivo}: {e}")
+            continue
+
+        if img is None:
+            st.error(f"Não foi possível decodificar a imagem: {nome_arquivo}")
+            continue
+            
         altura_px, largura_px = img.shape[:2]
         area_total_pixels = altura_px * largura_px
         
@@ -49,7 +78,7 @@ if arquivos_enviados:
         mm_por_pixel = largura_mm / largura_px
         um_por_pixel = mm_por_pixel * 1000.0
         
-        # 2. Inteligência de Cor
+        # 2. Inteligência de Cor (Amarelo ou Branco)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         amostra_hsv = hsv[altura_px//4:3*altura_px//4, largura_px//4:3*largura_px//4]
         tom_medio_h = np.mean(amostra_hsv[:, :, 0])
@@ -69,7 +98,7 @@ if arquivos_enviados:
             azul_alto = np.array([145, 255, 255])
             mascara = cv2.inRange(hsv, azul_baixo, azul_alto)
         
-        # 3. Contornos
+        # 3. Contornos das Gotas
         contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
         num_gotas = len(gotas_filtradas)
@@ -131,22 +160,21 @@ if arquivos_enviados:
                     
         cv_distribuicao = (np.std(contagem_quadrantes) / np.mean(contagem_quadrantes) * 100) if np.mean(contagem_quadrantes) > 0 else 0.0
 
-        # Guardar para tabelas e abas
+        # Guardar dados
         resultados_gerais.append({
-            "Nome do Arquivo": arquivo.name, "Tipo Detectado": tipo_cartao, "Cobertura (%)": round(porcentagem_cobertura, 2),
+            "Nome do Arquivo": nome_arquivo, "Tipo Detectado": tipo_cartao, "Cobertura (%)": round(porcentagem_cobertura, 2),
             "Nº de Gotas": num_gotas, "Densidade (gotas/cm²)": round(densidade_gotas, 2), "Dv0.1 (µm)": round(dv01, 1),
             "Dv0.5 / DMV (µm)": round(dv05, 1), "Dv0.9 (µm)": round(dv09, 1), "Amplitude (SPAN)": round(span, 2),
             "Gotas Pequenas (<150µm) %": round(pequenas, 1), "Gotas Médias (150-300µm) %": round(medias, 1), "Gotas Grandes (>300µm) %": round(grandes, 1),
             "CV da Distribuição (%)": round(cv_distribuicao, 2)
         })
         
-        dados_graficos[arquivo.name] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes]}
+        dados_graficos[nome_arquivo] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes]}
         
-        # Desenhar imagem final
         img_visualizacao = img.copy()
         cv2.drawContours(img_visualizacao, gotas_filtradas, -1, (0, 255, 0), 2)
-        imagens_processadas[arquivo.name] = {
-            "original": arquivo, "analisada": cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB), "cv_img": img_visualizacao
+        imagens_processadas[nome_arquivo] = {
+            "original": arquivo_exibicao, "analisada": cv2.cvtColor(img_visualizacao, cv2.COLOR_BGR2RGB), "cv_img": img_visualizacao
         }
 
     df_geral = pd.DataFrame(resultados_gerais)
@@ -155,7 +183,6 @@ if arquivos_enviados:
     with aba_upload:
         st.subheader("📊 Resumo das Métricas Principais")
         
-        # Médias consolidadas para os cards do topo
         media_dmv = df_geral["Dv0.5 / DMV (µm)"].mean()
         media_densidade = df_geral["Densidade (gotas/cm²)"].mean()
         media_cobertura = df_geral["Cobertura (%)"].mean()
@@ -164,11 +191,10 @@ if arquivos_enviados:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("DMV Médio Geral", f"{round(media_dmv, 1)} µm")
         
-        # Card Dinâmico de Densidade (Alvo de exemplo: Fungicida > 60 g/cm²)
         if media_densidade >= 60:
             c2.markdown(f"<div style='background-color:#d4edda;padding:10px;border-radius:5px;border-left:5px solid #28a745'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#155724'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#155724'>🟢 Excelente Cobertura</small></div>", unsafe_allow_html=True)
         else:
-            c2.markdown(f"<div style='background-color:#f8d7da;padding:10px;border-radius:5px;border-left:5px solid #dc3545'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#721c24'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#721c24'>🔴 Baixa Densidade (Ajuste o bico)</small></div>", unsafe_allow_html=True)
+            c2.markdown(f"<div style='background-color:#f8d7da;padding:10px;border-radius:5px;border-left:5px solid #dc3545'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#721c24'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#721c24'>🔴 Baixa Densidade</small></div>", unsafe_allow_html=True)
             
         c3.metric("Cobertura Média", f"{round(media_cobertura, 2)} %")
         c4.metric("CV Espacial Médio", f"{round(media_cv, 1)} %")
@@ -190,7 +216,6 @@ if arquivos_enviados:
         
         if arquivo_selecionado:
             col_g1, col_g2 = st.columns(2)
-            
             with col_g1:
                 st.markdown("**Distribuição do Tamanho das Gotas (Histograma)**")
                 df_hist = pd.DataFrame({"Diâmetro real (µm)": dados_graficos[arquivo_selecionado]["diametros"]})
@@ -212,7 +237,7 @@ if arquivos_enviados:
             with st.expander(f"Cartão: {nome_foto}"):
                 col_i1, col_i2 = st.columns(2)
                 with col_i1:
-                    st.image(imgs["original"], caption="Imagem Enviada", use_container_width=True)
+                    st.image(imgs["original"], caption="Imagem Original", use_container_width=True)
                 with col_i2:
                     st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
                     _, img_encoded = cv2.imencode('.jpeg', imgs["cv_img"])
