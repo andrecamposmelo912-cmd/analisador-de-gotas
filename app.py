@@ -7,7 +7,7 @@ import io
 import os
 import sqlite3
 from datetime import datetime
-import requests  # Nova biblioteca para buscar os dados de meteorologia
+import requests
 from PIL import Image
 from fpdf import FPDF
 import plotly.graph_objects as go
@@ -102,16 +102,14 @@ if not st.session_state["autenticado"]:
 # ==============================================================================
 def buscar_clima_cidade(nome_cidade):
     try:
-        # 1. Geocodificação da cidade para pegar Lat/Lon
         url_geo = f"https://geocoding-api.open-meteo.com/v1/search?name={nome_cidade}&count=1&language=pt"
         res_geo = requests.get(url_geo).json()
         if not res_geo.get("results"): return None
         
         loc = res_geo["results"][0]
         lat, lon = loc["latitude"], loc["longitude"]
-        nome_completo = f"{loc['name']}, {loc.get('admin1', '')} - {loc.get('country', '')}"
+        nome_completo = f"{loc['name']}, {loc.get('admin1', '')}"
         
-        # 2. Busca do clima atual baseado nas coordenadas
         url_clima = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m"
         res_clima = requests.get(url_clima).json()["current"]
         
@@ -143,7 +141,6 @@ with col_logos_topo:
 
 st.write("---")
 
-# Painel de Calibração e Clima na Lateral
 st.sidebar.header("🛠️ Parâmetros Operacionais")
 fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", 1.0, 3.0, 2.0, 0.1)
 
@@ -272,7 +269,6 @@ if arquivo_enviado:
         
         classe_asabe_final = classificar_asabe(text_dv05)
 
-        # SALVAMENTO AUTOMÁTICO NO HISTÓRICO DO SQLITE
         salvar_analise_bd(nome_arquivo, tipo_cartao, round(porcentagem_cobertura, 2), num_gotas, round(densidade_gotas, 2), round(text_dv05, 1), round(span, 2), classe_asabe_final)
 
         resultados_gerais.append({
@@ -290,6 +286,26 @@ if arquivo_enviado:
 
     df_geral = pd.DataFrame(resultados_gerais)
 
+    # --- DEFINIÇÃO DOS GRÁFICOS PLOTLY 3D ---
+    raio = dados_graficos[nome_arquivo]["dmv"] / 2.0
+    u = np.linspace(0, 2 * np.pi, 50)
+    
+    # 1. Gota em voo
+    v_sph = np.linspace(0, np.pi, 50)
+    xs, ys, zs = raio * np.outer(np.cos(u), np.sin(v_sph)), raio * np.outer(np.sin(u), np.sin(v_sph)), raio * np.outer(np.ones(np.size(u)), np.cos(v_sph))
+    fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale=[[0, '#a5d6a7'], [0.5, '#0099ff'], [1, '#0033aa']], showscale=False)])
+    fig_sph.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='cube'), height=450, margin=dict(l=0,r=0,b=0,t=10))
+
+    # 2. Gota impactada
+    v_imp = np.linspace(0, np.pi / 2, 50)
+    xi, yi, zi = (raio * fator_espalhamento) * np.outer(np.cos(u), np.sin(v_imp)), (raio * fator_espalhamento) * np.outer(np.sin(u), np.sin(v_imp)), (raio * 0.4) * np.outer(np.ones(np.size(u)), np.cos(v_imp))
+    tp = raio * fator_espalhamento * 1.5
+    Xp, Yp = np.meshgrid(np.linspace(-tp, tp, 10), np.linspace(-tp, tp, 10))
+    fig_imp = go.Figure()
+    fig_imp.add_trace(go.Surface(x=Xp, y=Yp, z=np.zeros_like(Xp), colorscale=[[0, '#2e7d32'], [1, '#1b5e20']], showscale=False, opacity=0.6))
+    fig_imp.add_trace(go.Surface(x=xi, y=yi, z=zi, colorscale=[[0, '#00e5ff'], [1, '#006064']], showscale=False))
+    fig_imp.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='manual', aspectratio=dict(x=1, y=1, z=0.4)), height=450, margin=dict(l=0,r=0,b=0,t=10))
+
     with aba_upload:
         st.write("---")
         st.markdown("### 📊 Dashboard de Resultados de Campo")
@@ -301,20 +317,16 @@ if arquivo_enviado:
         c_d3.metric(label="🎯 Cobertura do Alvo", value=f"{dados_amostra['Cobertura (%)']} %")
         c_d4.metric(label="🔢 Total de Gotas", value=int(dados_amostra['Nº de Gotas']))
 
-        # --- RECOMENDAÇÃO 1: INFORMAÇÃO ASABE EMBUTIDA SEM ALERTA VISUAL RADICAL ---
-        st.info(f"📋 **Classificação Técnica Internacional (ASABE S572):** O espectro da sua calda gerou gotas do tipo **{classe_asabe_final}**. Certifique-se de que essa classe corresponde à recomendação de bula do seu defensivo ou alvo biológico.")
+        st.info(f"📋 **Classificação Técnica Internacional (ASABE S572):** O espectro da sua calda gerou gotas do tipo **{classe_asabe_final}**.")
 
-        # --- RECOMENDAÇÃO 2: CORRELAÇÃO DE CLIMA AUTOMÁTICO COM AS GOTAS FINAS ---
         if dados_clima:
             st.write("---")
             st.markdown("### 🌤️ Diagnóstico Dinâmico de Risco Climático Coletado")
-            
-            # Se a umidade for baixa, temperatura alta e houver muitas gotas finas (<150um)
             perda_evap = round(pequenas, 1)
             if dados_clima["temp"] > 30.0 or dados_clima["uhr"] < 50.0:
-                st.warning(f"⚠️ **Condições Climáticas Desfavoráveis na Localidade:** A temperatura está em {dados_clima['temp']}°C e a UR em {dados_clima['uhr']}%. Com base na leitura do cartão, **{perda_evap}%** do seu volume aplicado (gotas finas) está sob alto risco de sofrer **Evaporação Instantânea** antes de atingir a cultura.")
+                st.warning(f"⚠️ **Condições Climáticas Desfavoráveis na Localidade:** A temperatura está em {dados_clima['temp']}°C e a UR em {dados_clima['uhr']}%. Com base na leitura do cartão, **{perda_evap}%** do seu volume aplicado (gotas finas) está sob alto risco de sofrer **Evaporação Instantânea**.")
             else:
-                st.success(f"✅ **Janela Climatológica Favorável:** Condições locais seguras. Apenas {perda_evap}% do espectro de gotas possui vulnerabilidade física para perdas térmicas transitórias.")
+                st.success(f"✅ **Janela Climatológica Favorável:** Condições locais seguras. Apenas {perda_evap}% do espectro possui vulnerabilidade térmica.")
 
     with aba_graficos:
         st.subheader("📊 Modelagem Espacial das Gotas")
@@ -331,27 +343,11 @@ if arquivo_enviado:
             st.write("---")
             st.markdown("### 🛰️ Comparação Espacial Realística 3D (Efeito do Impacto)")
             col_3d_1, col_3d_2 = st.columns(2)
-            raio = dados_graficos[nome_arquivo]["dmv"] / 2.0
-            u = np.linspace(0, 2 * np.pi, 50)
-            
             with col_3d_1:
                 st.markdown("<h4 style='text-align: center; color: #0099ff;'>🛰️ 1. Gota em Voo Sustentado (Esfera)</h4>", unsafe_allow_html=True)
-                v_sph = np.linspace(0, np.pi, 50)
-                xs, ys, zs = raio * np.outer(np.cos(u), np.sin(v_sph)), raio * np.outer(np.sin(u), np.sin(v_sph)), raio * np.outer(np.ones(np.size(u)), np.cos(v_sph))
-                fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale=[[0, '#a5d6a7'], [0.5, '#0099ff'], [1, '#0033aa']], showscale=False)])
-                fig_sph.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='cube'), height=450, margin=dict(l=0,r=0,b=0,t=10))
                 st.plotly_chart(fig_sph, use_container_width=True)
-
             with col_3d_2:
                 st.markdown("<h4 style='text-align: center; color: #2e7d32;'>🎯 2. Deposição Hidrodinâmica no Alvo</h4>", unsafe_allow_html=True)
-                v_imp = np.linspace(0, np.pi / 2, 50)
-                xi, yi, zi = (raio * fator_espalhamento) * np.outer(np.cos(u), np.sin(v_imp)), (raio * fator_espalhamento) * np.outer(np.sin(u), np.sin(v_imp)), (raio * 0.4) * np.outer(np.ones(np.size(u)), np.cos(v_imp))
-                tp = raio * fator_espalhamento * 1.5
-                Xp, Yp = np.meshgrid(np.linspace(-tp, tp, 10), np.linspace(-tp, tp, 10))
-                fig_imp = go.Figure()
-                fig_imp.add_trace(go.Surface(x=Xp, y=Yp, z=np.zeros_like(Xp), colorscale=[[0, '#2e7d32'], [1, '#1b5e20']], showscale=False, opacity=0.6))
-                fig_imp.add_trace(go.Surface(x=xi, y=yi, z=zi, colorscale=[[0, '#00e5ff'], [1, '#006064']], showscale=False))
-                fig_imp.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='manual', aspectratio=dict(x=1, y=1, z=0.4)), height=450, margin=dict(l=0,r=0,b=0,t=10))
                 st.plotly_chart(fig_imp, use_container_width=True)
 
     with aba_inspecao:
@@ -362,29 +358,157 @@ if arquivo_enviado:
             col_i2.image(imagens_processadas[nome_arquivo]["analisada"], caption="Área Útil Isolada (Gotas em Verde)", use_container_width=True)
 
     with aba_relatorio:
-        # Botão de download do PDF mantido conforme o seu padrão estético original...
-        st.write("### 📜 Laudo em PDF")
-        # (Lógica da fpdf idêntica à versão anterior)
+        st.markdown("## 📋 Geração de Laudo Técnico")
+        
+        dados_cartao = df_geral.iloc[0]
+        dmv_atual = dados_cartao["Dv0.5 / DMV (µm)"]
+        densidade_atual = dados_cartao["Densidade (gotas/cm²)"]
+        deriva_atual = dados_cartao["Gotas Pequenas (<150µm) %"]
+        medias_atual = dados_cartao["Gotas Médias (150-300µm) %"]
+        grandes_atual = dados_cartao["Gotas Grandes (>300µm) %"]
+        span_atual = dados_cartao["Amplitude (SPAN)"]
+        cobertura_atual = dados_cartao["Cobertura (%)"]
+        cv_global = dados_cartao["CV da Distribuição (%)"]
+        
+        rec_deriva = "Risco de Deriva Elevado: Ajuste os bicos." if deriva_atual > 30 else "Controle de Deriva Eficiente."
+        rec_densidade = "Densidade Insuficiente: Verifique o volume de calda." if densidade_atual < 60 else "Densidade Excelente."
 
-# --- RECOMENDAÇÃO 3: PAINEL DE HISTÓRICO COMPLETO INTEGRADO NO SQLITE ---
+        def gerar_pdf_laudo_grafico():
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_margins(15, 15, 15)
+            
+            # --- HEADER PREMIUM ---
+            pdf.set_fill_color(26, 36, 43)
+            pdf.rect(0, 0, 210, 42, 'F')
+            pdf.set_font("Arial", "B", 14)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_y(10)
+            pdf.cell(0, 8, "LAUDO DA QUALIDADE DE PULVERIZACAO INTERATIVA", ln=True, align="C")
+            pdf.set_font("Arial", "I", 9)
+            pdf.cell(0, 5, "Homologacao Tecnica Operacional: IAC & Programa Aplique Bem", ln=True, align="C")
+            
+            if os.path.exists(CAMINHO_LOGO_IAC): pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
+            if os.path.exists(CAMINHO_LOGO_APLIQUEBEM): pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
+            
+            # --- SEÇÃO METEOROLOGIA NO LAUDO ---
+            pdf.set_y(75)
+            pdf.set_text_color(40, 50, 60)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 6, "1. Condicoes Climatologicas da Estacao Local de Analise", ln=True)
+            pdf.ln(1)
+            pdf.set_fill_color(245, 247, 248)
+            pdf.rect(15, pdf.get_y(), 180, 16, 'F')
+            pdf.set_font("Arial", "", 9.5)
+            
+            if dados_clima:
+                texto_clima = f"Localidade informada: {dados_clima['local']}   |   Temperatura: {dados_clima['temp']} degC\nUmidade Relativa (UR): {dados_clima['uhr']}%   |   Velocidade do Vento: {dados_clima['vento']} km/h"
+            else:
+                texto_clima = f"Localidade informada: {cidade_campo} (Dados de satelite nao carregados no momento da impressao)."
+            pdf.multi_cell(180, 5, texto_clima, border=1)
+            
+            # --- CARDS DE METRICAS ---
+            pdf.ln(4)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 6, "2. Indicadores de Performance Operacional", ln=True)
+            pdf.ln(2)
+            
+            indicadores = [
+                {"label": "DMV GERAL", "val": f"{dmv_atual} um", "status": classe_asabe_final},
+                {"label": "DENSIDADE", "val": f"{densidade_atual} g/cm2", "status": "Ideal" if densidade_atual >= 60 else "Baixa"},
+                {"label": "ESTABILIDADE", "val": f"SPAN {span_atual}", "status": "Estavel" if span_atual <= 1.2 else "Variavel"}
+            ]
+            pos_x = 15
+            for ind in indicadores:
+                pdf.set_fill_color(248, 249, 250)
+                pdf.rect(pos_x, pdf.get_y(), 56, 18, 'F')
+                pdf.rect(pos_x, pdf.get_y(), 56, 18, 'D')
+                pdf.set_font("Arial", "B", 7.5)
+                pdf.set_text_color(100, 110, 120)
+                pdf.text(pos_x + 4, pdf.get_y() + 5, ind["label"])
+                pdf.set_font("Arial", "B", 12)
+                pdf.set_text_color(20, 30, 40)
+                pdf.text(pos_x + 4, pdf.get_y() + 11, ind["val"])
+                pdf.set_font("Arial", "", 7.5)
+                pdf.text(pos_x + 4, pdf.get_y() + 15, f"Status: {ind['status']}")
+                pos_x += 62
+            
+            # --- SEÇÃO MODELAGEM 3D INSERIDA ---
+            pdf.set_y(122)
+            pdf.set_text_color(40, 50, 60)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 6, "3. Projecao Computacional 3D (Efeito Fator Espalhamento)", ln=True)
+            pdf.ln(2)
+            
+            # Exportando os graficos do Plotly para imagens temporarias usando o Kaleido
+            tmp_sph = "tmp_sph.png"
+            tmp_imp = "tmp_imp.png"
+            fig_sph.write_image(tmp_sph, width=500, height=400, scale=2)
+            fig_imp.write_image(tmp_imp, width=500, height=400, scale=2)
+            
+            y_grafico = pdf.get_y()
+            # Desenha os dois graficos lado a lado
+            pdf.image(tmp_sph, x=15, y=y_grafico, w=88, h=65)
+            pdf.image(tmp_imp, x=107, y=y_grafico, w=88, h=65)
+            
+            pdf.set_font("Arial", "I", 8)
+            pdf.set_text_color(100, 100, 100)
+            pdf.text(18, y_grafico + 68, "Modelo A: Gota esferica suspensa em voo livre.")
+            pdf.text(110, y_grafico + 68, f"Modelo B: Mancha expandida apos colidir (Fator: {fator_espalhamento}).")
+            
+            if os.path.exists(tmp_sph): os.remove(tmp_sph)
+            if os.path.exists(tmp_imp): os.remove(tmp_imp)
+            
+            # --- SEÇÃO DIAGNÓSTICO ---
+            pdf.set_y(200)
+            pdf.set_font("Arial", "B", 11)
+            pdf.set_text_color(40, 50, 60)
+            pdf.cell(0, 6, "4. Diagnostico de Campo e Engenharia de Calibracao", ln=True)
+            pdf.ln(1)
+            pdf.set_fill_color(255, 251, 230)
+            pdf.set_text_color(90, 70, 10)
+            pdf.set_font("Arial", "", 9)
+            texto_quadro = f"Recomendacoes Técnicas:\n[DERIVA] -> {rec_deriva}\n[DENSIDADE] -> {rec_densidade}"
+            pdf.multi_cell(180, 5, texto_quadro, border=1, fill=True)
+            
+            # --- CARTÃO HORIZONTAL ---
+            pdf.set_y(222)
+            pdf.set_text_color(40, 50, 60)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 6, "5. Amostragem Digital do Cartao Hidrossensivel", ln=True)
+            pdf.ln(1)
+            
+            if nome_arquivo in imagens_processadas:
+                img_f = Image.fromarray(cv2.cvtColor(imagens_processadas[nome_arquivo]["focada_bgr"], cv2.COLOR_BGR2RGB))
+                img_horizontal = img_f.rotate(90, expand=True)
+                tmp_c = "tmp_laudo_h.jpg"
+                img_horizontal.save(tmp_c, "JPEG", quality=95)
+                pdf.image(tmp_c, x=50, y=pdf.get_y(), w=110, h=35)
+                if os.path.exists(tmp_c): os.remove(tmp_c)
+            
+            # --- RODAPÉ ---
+            pdf.set_y(266)
+            pdf.set_font("Arial", "I", 7.5)
+            pdf.set_text_color(140, 140, 140)
+            pdf.cell(0, 4, "Algoritmo Computacional de Calibracao Hidrossensivel IAC / Aplique Bem 2026.", ln=True, align="C")
+
+            return pdf.output(dest='S')
+
+        pdf_b = gerar_pdf_laudo_grafico()
+        st.download_button(
+            label="🚀 GERAR LAUDO COMPLETO COM GRÁFICOS 3D E CLIMA (PDF)",
+            data=bytes(pdf_b),
+            file_name=f"Laudo_Completo_3D_{nome_arquivo.split('.')[0]}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+# --- PAINEL DE HISTÓRICO ---
 with aba_relatorio:
     st.write("---")
-    st.markdown("### 🗄️ Histórico Permanente de Análises Realizadas (Banco de Dados Local)")
-    st.markdown("Todas as leituras processadas ficam salvas localmente neste dispositivo para auditoria técnica continuada.")
-    
+    st.markdown("### 🗄️ Histórico Permanente de Análises")
     conn = sqlite3.connect(DB_NAME)
     df_historico = pd.read_sql_query("SELECT * FROM historico_analises ORDER BY id DESC", conn)
     conn.close()
-    
     if not df_historico.empty:
         st.dataframe(df_historico, use_container_width=True)
-        if st.button("🗑️ Limpar Todo o Banco de Dados", use_container_width=True):
-            conn = sqlite3.connect(DB_NAME)
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM historico_analises")
-            conn.commit()
-            conn.close()
-            st.success("Histórico limpo com sucesso!")
-            st.rerun()
-    else:
-        st.info("Nenhuma análise registrada no banco de dados ainda.")
