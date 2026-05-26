@@ -234,13 +234,12 @@ if arquivos_enviados:
                 with col_i2:
                     st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
 
-    # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO (NOVO!) ---
+    # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO ---
     with aba_relatorio:
         st.subheader("📋 Laudo de Campo e Recomendações de Pulverização")
         cartao_relatorio = st.selectbox("Selecione o cartão para gerar o Laudo:", list(dados_graficos.keys()), key="rel_select")
         
         if cartao_relatorio:
-            # Puxa os dados específicos desse cartão selecionado
             dados_cartao = df_geral[df_geral["Nome do Arquivo"] == cartao_relatorio].iloc[0]
             
             dmv_atual = dados_cartao["Dv0.5 / DMV (µm)"]
@@ -249,14 +248,19 @@ if arquivos_enviados:
             span_atual = dados_cartao["Amplitude (SPAN)"]
             cobertura_atual = dados_cartao["Cobertura (%)"]
             
-            # --- CLASSIFICAÇÃO INTELIGENTE DO DMV ---
-            if dmv_atual < 100: classificação_gota = "Muito Fina 🛑 (Risco crítico de evaporação)"
-            elif 100 <= dmv_atual < 150: classificação_gota = "Fina ⚠️ (Alta penetração, mas risco elevado de deriva)"
-            elif 150 <= dmv_atual <= 250: classificação_gota = "Média ✅ (Excelente equilíbrio para Fungicidas/Inseticidas)"
-            elif 250 < dmv_atual <= 350: classificação_gota = "Grossa 👍 (Ideal para Herbicidas Sistêmicos / Pré-emergentes)"
-            else: classificação_gota = "Muito Grossa ⚠️ (Risco de escorrimento nas folhas)"
+            if dmv_atual < 100: classificação_gota = "Muito Fina (Risco crítico de evaporação)"
+            elif 100 <= dmv_atual < 150: classificação_gota = "Fina (Alta penetração, mas risco elevado de deriva)"
+            elif 150 <= dmv_atual <= 250: classificação_gota = "Média (Excelente equilíbrio para Fungicidas/Inseticidas)"
+            elif 250 < dmv_atual <= 350: classificação_gota = "Grossa (Ideal para Herbicidas Sistêmicos / Pré-emergentes)"
+            else: classificação_gota = "Muito Grossa (Risco de escorrimento nas folhas)"
 
-            # ---- ESTILIZAÇÃO DO RELATÓRIO PARA IMPRESSÃO ----
+            txt_densidade = "Densidade ideal para fungicidas e alvos difíceis." if densidade_atual >= 60 else "Baixa densidade. Risco de o produto não atingir todo o alvo."
+            txt_deriva = "ALTO RISCO: Mais de 30% do volume aplicado pode evaporar ou se perder no trajeto." if deriva_atual > 30 else "Risco de deriva controlado e seguro sob condições normais."
+            txt_span = "Gotas muito uniformes (Espectro homogêneo)." if span_atual <= 1.2 else "Gotas desuniformes (Mistura perigosa de gotas muito grandes e muito pequenas)."
+            
+            recom_deriva = "Se o Risco de Deriva está alto, reduza ligeiramente a pressão de trabalho ou utilize pontas com indução de ar." if deriva_atual > 30 else "Parabéns, os níveis de deriva estão baixos. Mantenha os parâmetros operacionais."
+            recom_densidade = "Sua densidade está baixa. Considere aumentar a taxa de aplicação ou usar bicos que quebrem mais o espectro, se o clima permitir." if densidade_atual < 60 else "Densidade excelente! Garante ótima cobertura e translocação do produto na folha."
+
             st.markdown(f"""
             <div style="border:2px solid #1f77b4; padding:25px; border-radius:10px; background-color:#fafafa;">
                 <h2 style="color:#1f77b4; margin-top:0;">LAUDO DE AVALIAÇÃO DA QUALIDADE DE APLICAÇÃO</h2>
@@ -278,14 +282,34 @@ if arquivos_enviados:
                     <tr>
                         <td style="padding:8px; border:1px solid #ddd;"><strong>Densidade de Gotas</strong></td>
                         <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{densidade_atual} gotas/cm²</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{ "🟢 Densidade ideal para fungicidas e alvos difíceis." if densidade_atual >= 60 else "🔴 Baixa densidade. Risco de o produto não atingir todo o alvo." }</td>
+                        <td style="padding:8px; border:1px solid #ddd;">{txt_densidade}</td>
                     </tr>
                     <tr>
                         <td style="padding:8px; border:1px solid #ddd;"><strong>Potencial de Deriva</strong></td>
                         <td style="padding:8px; border:1px solid #ddd; font-size:16px; color:#d62728;"><strong>{deriva_atual}%</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{ "⚠️ ALTO RISCO: Mais de 30% do volume aplicado pode evaporar ou se perder no trajeto." if deriva_atual > 30 else "🟢 Risco de deriva controlado e seguro sob condições normais." }</td>
+                        <td style="padding:8px; border:1px solid #ddd;">{txt_deriva}</td>
                     </tr>
                     <tr>
                         <td style="padding:8px; border:1px solid #ddd;"><strong>Uniformidade (SPAN)</strong></td>
                         <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{span_atual}</strong></td>
-                        <td style="padding:8px; border:1px solid #ddd;">{ "👍 Gotas muito uniformes (
+                        <td style="padding:8px; border:1px solid #ddd;">{txt_span}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:8px; border:1px solid #ddd;"><strong>Cobertura Real</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{cobertura_atual}%</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd;">Porcentagem da área útil do cartão que recebeu a calda.</td>
+                    </tr>
+                </table>
+                
+                <h3 style="color:#333;">2. Recomendações e Plano de Ação do Especialista (IA)</h3>
+                <div style="background-color:#fff3cd; padding:15px; border-left:6px solid #ffc107; border-radius:4px; margin-bottom:15px; color:#664d03;">
+                    <strong>💡 Como corrigir os problemas detectados neste cartão:</strong><br>
+                    • {recom_deriva}<br>
+                    • {recom_densidade}
+                </div>
+                
+                <p style="text-align:center; color:#777; font-size:12px; margin-top:30px;">Relatório gerado automaticamente pelo Analisador Avançado de Gotas - Tecnologia Agro 2026</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.info("💡 **Dica de Impressão:** Para salvar esse laudo como um documento ou PDF, basta apertar **Ctrl + P** (ou Cmd + P no Mac) e escolher a opção 'Salvar como PDF' no seu próprio navegador!")
