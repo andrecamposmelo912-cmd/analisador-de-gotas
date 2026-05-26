@@ -7,15 +7,15 @@ from pillow_heif import register_heif_opener
 import io
 from PIL import Image
 
-# Registra o suporte a arquivos HEIC/HEIF na biblioteca de imagens
+# Registra o suporte a arquivos HEIC/HEIF do iPhone
 register_heif_opener()
 
 st.set_page_config(page_title="Análise Avançada de Gotas", page_icon="💧", layout="wide")
 
-st.title("💧 Analisador Avançado de Papel Hidrossolúvel")
+st.title("💧 Analisador de Gotas Inteligente & Consultivo")
 st.markdown("""
-Este aplicativo realiza a análise completa do espectro de pulverização de cartões hidrossolúveis (**8cm x 3cm**).
-Suporta **cartões revelados (fundo branco)**, **cartões originais (fundo amarelo)** e imagens de **iPhone (.HEIC)**.
+Este software realiza a análise completa do espectro de pulverização de cartões hidrossolúveis.
+Diferente dos sistemas antigos, traduzimos dados estatísticos complexos em **diagnósticos de campo fáceis de entender**.
 """)
 
 # Configurações de calibração na barra lateral
@@ -23,7 +23,12 @@ st.sidebar.header("🛠️ Configurações de Calibração")
 fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", min_value=1.0, max_value=3.0, value=2.0, step=0.1, 
                                       help="Fator pelo qual a gota aumenta ao impactar o papel. O padrão de mercado é 2.0.")
 
-aba_upload, aba_graficos, aba_inspecao = st.tabs(["📥 Upload e Resultados", "📊 Gráficos do Espectro", "🔍 Inspeção de Cartões"])
+aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
+    "📥 Upload e Resultados", 
+    "📊 Gráficos do Espectro", 
+    "🔍 Inspeção de Cartões",
+    "📋 Relatório Técnico Didático"
+])
 
 arquivos_enviados = st.file_uploader("Arraste ou selecione as imagens dos cartões", type=['jpg', 'jpeg', 'png', 'heic', 'heif'], accept_multiple_files=True)
 
@@ -45,12 +50,9 @@ if arquivos_enviados:
         
         try:
             if extensao in ['heic', 'heif']:
-                # Abre a imagem HEIC de forma nativa e segura usando a Pillow convertida para RGB
                 pil_img = Image.open(arquivo).convert("RGB")
                 img_rgb = np.array(pil_img)
-                # Converte para BGR para o OpenCV trabalhar
                 img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-                
                 _, img_jpeg_bytes = cv2.imencode('.jpg', img)
                 arquivo_exibicao = io.BytesIO(img_jpeg_bytes.tobytes())
             else:
@@ -178,7 +180,6 @@ if arquivos_enviados:
     # --- ABA 1: UPLOAD E RESULTADOS ---
     with aba_upload:
         st.subheader("📊 Resumo das Métricas Principais")
-        
         media_dmv = df_geral["Dv0.5 / DMV (µm)"].mean()
         media_densidade = df_geral["Densidade (gotas/cm²)"].mean()
         media_cobertura = df_geral["Cobertura (%)"].mean()
@@ -186,12 +187,10 @@ if arquivos_enviados:
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("DMV Médio Geral", f"{round(media_dmv, 1)} µm")
-        
         if media_densidade >= 60:
             c2.markdown(f"<div style='background-color:#d4edda;padding:10px;border-radius:5px;border-left:5px solid #28a745'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#155724'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#155724'>🟢 Excelente Cobertura</small></div>", unsafe_allow_html=True)
         else:
             c2.markdown(f"<div style='background-color:#f8d7da;padding:10px;border-radius:5px;border-left:5px solid #dc3545'><strong>Densidade Média</strong><br><span style='font-size:24px;color:#721c24'>{round(media_densidade, 1)} g/cm²</span><br><small style='color:#721c24'>🔴 Baixa Densidade</small></div>", unsafe_allow_html=True)
-            
         c3.metric("Cobertura Média", f"{round(media_cobertura, 2)} %")
         c4.metric("CV Espacial Médio", f"{round(media_cv, 1)} %")
         
@@ -209,7 +208,6 @@ if arquivos_enviados:
     with aba_graficos:
         st.subheader("📈 Análise Gráfica Estatística")
         arquivo_selecionado = st.selectbox("Selecione o cartão para ver os gráficos:", list(dados_graficos.keys()))
-        
         if arquivo_selecionado:
             col_g1, col_g2 = st.columns(2)
             with col_g1:
@@ -218,7 +216,6 @@ if arquivos_enviados:
                 fig_hist = px.histogram(df_hist, x="Diâmetro real (µm)", nbins=20, color_discrete_sequence=['#1f77b4'])
                 fig_hist.update_layout(yaxis_title="Quantidade de Gotas", showlegend=False)
                 st.plotly_chart(fig_hist, use_container_width=True)
-                
             with col_g2:
                 st.markdown("**Classificação do Volume de Gotas (Risco de Deriva)**")
                 classes = dados_graficos[arquivo_selecionado]["classes"]
@@ -236,8 +233,59 @@ if arquivos_enviados:
                     st.image(imgs["original"], caption="Imagem Original", use_container_width=True)
                 with col_i2:
                     st.image(imgs["analisada"], caption="Gotas Detectadas em Verde", use_container_width=True)
-                    _, img_encoded = cv2.imencode('.jpeg', imgs["cv_img"])
-                    st.download_button(
-                        label=f"📥 Baixar Foto Analisada ({nome_foto})",
-                        data=img_encoded.tobytes(), file_name=f"analisado_{nome_foto}", mime="image/jpeg"
-                    )
+
+    # --- ABA 4: RELATÓRIO TÉCNICO DIDÁTICO (NOVO!) ---
+    with aba_relatorio:
+        st.subheader("📋 Laudo de Campo e Recomendações de Pulverização")
+        cartao_relatorio = st.selectbox("Selecione o cartão para gerar o Laudo:", list(dados_graficos.keys()), key="rel_select")
+        
+        if cartao_relatorio:
+            # Puxa os dados específicos desse cartão selecionado
+            dados_cartao = df_geral[df_geral["Nome do Arquivo"] == cartao_relatorio].iloc[0]
+            
+            dmv_atual = dados_cartao["Dv0.5 / DMV (µm)"]
+            densidade_atual = dados_cartao["Densidade (gotas/cm²)"]
+            deriva_atual = dados_cartao["Gotas Pequenas (<150µm) %"]
+            span_atual = dados_cartao["Amplitude (SPAN)"]
+            cobertura_atual = dados_cartao["Cobertura (%)"]
+            
+            # --- CLASSIFICAÇÃO INTELIGENTE DO DMV ---
+            if dmv_atual < 100: classificação_gota = "Muito Fina 🛑 (Risco crítico de evaporação)"
+            elif 100 <= dmv_atual < 150: classificação_gota = "Fina ⚠️ (Alta penetração, mas risco elevado de deriva)"
+            elif 150 <= dmv_atual <= 250: classificação_gota = "Média ✅ (Excelente equilíbrio para Fungicidas/Inseticidas)"
+            elif 250 < dmv_atual <= 350: classificação_gota = "Grossa 👍 (Ideal para Herbicidas Sistêmicos / Pré-emergentes)"
+            else: classificação_gota = "Muito Grossa ⚠️ (Risco de escorrimento nas folhas)"
+
+            # ---- ESTILIZAÇÃO DO RELATÓRIO PARA IMPRESSÃO ----
+            st.markdown(f"""
+            <div style="border:2px solid #1f77b4; padding:25px; border-radius:10px; background-color:#fafafa;">
+                <h2 style="color:#1f77b4; margin-top:0;">LAUDO DE AVALIAÇÃO DA QUALIDADE DE APLICAÇÃO</h2>
+                <p><strong>Identificação da Amostra:</strong> {cartao_relatorio} | <strong>Status do Sistema:</strong> Análise Concluída</p>
+                <hr style="border:1px solid #1f77b4;">
+                
+                <h3 style="color:#333;">1. Diagnóstico do Espectro de Gotas</h3>
+                <table style="width:100%; border-collapse: collapse; margin-bottom:20px;">
+                    <tr style="background-color:#eaeaea; text-align:left;">
+                        <th style="padding:8px; border:1px solid #ddd;">Parâmetro Analisado</th>
+                        <th style="padding:8px; border:1px solid #ddd;">Valor Lido</th>
+                        <th style="padding:8px; border:1px solid #ddd;">Interpretação Prática para o Campo</th>
+                    </tr>
+                    <tr>
+                        <td style="padding:8px; border:1px solid #ddd;"><strong>DMV (Diâmetro Mediano)</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd; font-size:16px; color:#0056b3;"><strong>{dmv_atual} µm</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd;">Classe de Gotas: <strong>{classificação_gota}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding:8px; border:1px solid #ddd;"><strong>Densidade de Gotas</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{densidade_atual} gotas/cm²</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd;">{ "🟢 Densidade ideal para fungicidas e alvos difíceis." if densidade_atual >= 60 else "🔴 Baixa densidade. Risco de o produto não atingir todo o alvo." }</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:8px; border:1px solid #ddd;"><strong>Potencial de Deriva</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd; font-size:16px; color:#d62728;"><strong>{deriva_atual}%</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd;">{ "⚠️ ALTO RISCO: Mais de 30% do volume aplicado pode evaporar ou se perder no trajeto." if deriva_atual > 30 else "🟢 Risco de deriva controlado e seguro sob condições normais." }</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:8px; border:1px solid #ddd;"><strong>Uniformidade (SPAN)</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd; font-size:16px;"><strong>{span_atual}</strong></td>
+                        <td style="padding:8px; border:1px solid #ddd;">{ "👍 Gotas muito uniformes (
