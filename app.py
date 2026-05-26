@@ -7,6 +7,7 @@ import io
 import os
 from PIL import Image
 from fpdf import FPDF
+import plotly.graph_objects as go  # Nova biblioteca para a projeção 3D
 
 # Registra o suporte a arquivos HEIC/HEIF do iPhone
 register_heif_opener()
@@ -31,13 +32,13 @@ img_iac = carregar_logo(CAMINHO_LOGO_IAC)
 img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 
 # ==============================================================================
-# 🔐 TELA DE LOGIN CENTRALIZADA E PROPORCIONAL
+# 🔐 TELA DE LOGIN ATUALIZADA (NOVOS USUÁRIOS GUARDADOS)
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
     "andre": "iaciac",
     "manoel": "iaciac",
     "hamilton": "iaciac",
-    "iac": "apliquebem2026"  
+    "iac": "apliquebem2026"
 }
 
 if "autenticado" not in st.session_state:
@@ -100,7 +101,7 @@ fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", mi
 
 aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
     "📥 Captura e Resultados", 
-    "📊 Gráficos do Espectro", 
+    "📊 Gráficos do Espectro e Projeção 3D", 
     "🔍 Inspeção de Cartões",
     "📋 Relatório Técnico Infográfico"
 ])
@@ -251,7 +252,7 @@ if arquivo_enviado:
             "CV da Distribuição (%)": round(cv_espacial, 2)
         })
         
-        dados_graficos[nome_arquivo] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes]}
+        dados_graficos[nome_arquivo] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes], "dmv": text_dv05}
         
         img_visualizacao = img_focada.copy()
         cv2.drawContours(img_visualizacao, gotas_filtradas, -1, (0, 255, 0), 2)
@@ -273,28 +274,22 @@ if arquivo_enviado:
         num_gotas = dados_amostra["Nº de Gotas"]
         densidade = dados_amostra["Densidade (gotas/cm²)"]
         dmv = dados_amostra["Dv0.5 / DMV (µm)"]
-        span = dados_amostra["Amplitude (SPAN)"]
-        cv_espacial_val = dados_amostra["CV da Distribuição (%)"]
 
         col_dash1, col_dash2, col_dash3, col_dash4 = st.columns(4)
-        with col_dash1:
-            st.metric(label="💧 Diâmetro Mediano (DMV)", value=f"{dmv} µm")
-        with col_dash2:
-            st.metric(label="📈 Densidade de Gotas", value=f"{densidade} g/cm²")
-        with col_dash3:
-            st.metric(label="🎯 Cobertura do Alvo", value=f"{cobertura} %")
-        with col_dash4:
-            st.metric(label="🔢 Total de Gotas", value=int(num_gotas))
+        with col_dash1: st.metric(label="💧 Diâmetro Mediano (DMV)", value=f"{dmv} µm")
+        with col_dash2: st.metric(label="📈 Densidade de Gotas", value=f"{densidade} g/cm²")
+        with col_dash3: st.metric(label="🎯 Cobertura do Alvo", value=f"{cobertura} %")
+        with col_dash4: st.metric(label="🔢 Total de Gotas", value=int(num_gotas))
 
         st.write("---")
         with st.expander("🔍 Ver Dados Completos em Tabela (Excel)"):
             st.dataframe(df_geral, use_container_width=True)
-            csv_formatado = formatar_csv_br(df_geral)
-            st.download_button(label="📥 Baixar Tabela (.CSV Excel)", data=csv_formatado, file_name="dados_gotas.csv", mime="text/csv", use_container_width=True)
 
-    # --- GRÁFICOS ---
+    # --- GRÁFICOS E NOVA PROJEÇÃO 3D INTERATIVA ---
     with aba_graficos:
-        st.subheader("Análise Gráfica Estatística")
+        st.subheader("Análise Estatística e Modelagem Espacial das Gotas")
+        st.write("---")
+        
         if nome_arquivo in dados_graficos:
             col_g1, col_g2 = st.columns(2)
             with col_g1:
@@ -305,8 +300,68 @@ if arquivo_enviado:
             with col_g2:
                 st.markdown("**Distribuição de Classes de Gotas (%)**")
                 classes = dados_graficos[nome_arquivo]["classes"]
-                df_classes = pd.DataFrame({"Percentual (%)": classes}, index=['Pequenas (' + str(round(pequenas,1)) + '%)', 'Médias (' + str(round(medias,1)) + '%)', 'Grandes (' + str(round(grandes,1)) + '%)'])
+                df_classes = pd.DataFrame({"Percentual (%)": classes}, index=['Pequenas', 'Médias', 'Grandes'])
                 st.bar_chart(df_classes)
+            
+            st.write("---")
+            st.markdown("### 🛰️ Projeção Tridimensional Interativa da Gota (DMV)")
+            st.markdown("Esta é uma simulação matemática 3D da gota baseada no **Diâmetro Mediano Volumétrico (DMV)** calculado. Ela representa a geometria e a área de deposição da calda sobre a superfície foliar após o impacto.")
+            
+            # --- MODELAGEM MATEMÁTICA DA GOTA EM 3D ---
+            # Pegamos o raio real do DMV da amostra (em micrômetros)
+            raio_gota = dados_graficos[nome_arquivo]["dmv"] / 2.0
+            
+            # Criamos uma malha esférica (Calota Esférica achatada por impacto)
+            u = np.linspace(0, 2 * np.pi, 60)
+            v = np.linspace(0, np.pi / 2, 40)  # Cortado em pi/2 para simular o repouso plano na folha
+            
+            # Coordenadas X, Y, Z da Gota
+            x_gota = raio_gota * np.outer(np.cos(u), np.sin(v))
+            y_gota = raio_gota * np.outer(np.sin(u), np.sin(v))
+            z_gota = (raio_gota * 0.6) * np.outer(np.ones(np.size(u)), np.cos(v)) # Multiplicador 0.6 simula achatamento real
+            
+            # Plano da Folha de Fundo (Alvo plano verde)
+            tamanho_plano = raio_gota * 2.0
+            xp = np.linspace(-tamanho_plano, tamanho_plano, 10)
+            yp = np.linspace(-tamanho_plano, tamanho_plano, 10)
+            Xp, Yp = np.meshgrid(xp, yp)
+            Zp = np.zeros_like(Xp)
+            
+            # Montagem do cenário interativo no Plotly
+            fig_3d = go.Figure()
+            
+            # 1. Adiciona a Superfície 3D da Gota (Azul metálico líquido)
+            fig_3d.add_trace(go.Surface(
+                x=x_gota, y=y_gota, z=z_gota,
+                colorscale=[[0, '#0099ff'], [1, '#0033aa']],
+                showscale=False,
+                name=f"Gota DMV ({dados_graficos[nome_arquivo]['dmv']} µm)"
+            ))
+            
+            # 2. Adiciona o Plano da Folha (Verde Agro)
+            fig_3d.add_trace(go.Surface(
+                x=Xp, y=Yp, z=Zp,
+                colorscale=[[0, '#2e7d32'], [1, '#1b5e20']],
+                showscale=False,
+                opacity=0.7,
+                name="Superfície Foliar"
+            ))
+            
+            # Ajustes de câmera e design do gráfico 3D
+            fig_3d.update_layout(
+                title=f"Modelo de Impacto 3D - Gota Padrão da Aplicação ({dados_graficos[nome_arquivo]['dmv']} µm)",
+                scene=dict(
+                    xaxis_title="Largura (µm)",
+                    yaxis_title="Comprimento (µm)",
+                    zaxis_title="Altura da Calda (µm)",
+                    aspectmode='manual',
+                    aspectratio=dict(x=1, y=1, z=0.5) # Mantém a proporção real achatada
+                ),
+                margin=dict(l=0, r=0, b=0, t=40),
+                height=600
+            )
+            
+            st.plotly_chart(fig_3d, use_container_width=True)
 
     # --- INSPEÇÃO ---
     with aba_inspecao:
@@ -345,7 +400,7 @@ if arquivo_enviado:
                 pdf.set_margins(15, 15, 15)
                 
                 # --- HEADER PREMIUM DARK ---
-                pdf.set_fill_color(26, 36, 43)  # Cinza Escuro Executivo (Jet Black)
+                pdf.set_fill_color(26, 36, 43)
                 pdf.rect(0, 0, 210, 42, 'F')
                 
                 pdf.set_font("Arial", "B", 15)
@@ -358,18 +413,17 @@ if arquivo_enviado:
                 pdf.set_font("Arial", "", 8)
                 pdf.cell(0, 4, f"Amostra Identificada: {nome_arquivo}", ln=True, align="C")
                 
-                # Logotipos nas laterais logo abaixo da barra escura
                 if os.path.exists(CAMINHO_LOGO_IAC):
                     pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
                 if os.path.exists(CAMINHO_LOGO_APLIQUEBEM):
                     pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
                 
                 # --- SEÇÃO 1: CARDS DE PERFORMANCE OPERACIONAL ---
-                pdf.set_y(78) # Aumentado espaço do topo
+                pdf.set_y(78)
                 pdf.set_text_color(40, 50, 60)
                 pdf.set_font("Arial", "B", 12)
                 pdf.cell(0, 6, "1. Indicadores de Performance Operacional (Metricas Chave)", ln=True)
-                pdf.ln(3) # Mais respiro entre o título e os cards
+                pdf.ln(3)
                 
                 indicadores = [
                     {"label": "DMV GERAL", "val": f"{dmv_atual} um", "status": classe_gota, "color": (80, 200, 120) if classe_gota == "Média" else (240, 170, 60)},
@@ -400,8 +454,8 @@ if arquivo_enviado:
                     
                     pos_x += 62
                 
-                # --- SEÇÃO 2: QUADRADO DINÂMICO DE COBERTURA & HISTOGRAMA ---
-                pdf.set_y(114) # Aumentado espaçamento para não colar nos cards superiores
+                # --- SEÇÃO 2: COBERTURA & HISTOGRAMA ---
+                pdf.set_y(114)
                 pdf.set_font("Arial", "B", 11)
                 pdf.set_text_color(40, 50, 60)
                 pdf.cell(100, 6, "2. Representacao da Cobertura Real no Alvo", False)
@@ -410,12 +464,10 @@ if arquivo_enviado:
                 
                 y_secao2 = pdf.get_y()
                 
-                # Caixa Esquerda: Quadrado de Cobertura Grafica
                 pdf.set_fill_color(240, 243, 245)
                 pdf.rect(15, y_secao2, 85, 42, 'F')
                 pdf.rect(15, y_secao2, 85, 42, 'D')
                 
-                # Desenhar o "Bloco Foliar" (Proporção da Cobertura)
                 pdf.set_fill_color(220, 225, 230)
                 pdf.rect(20, y_secao2 + 6, 30, 30, 'F')
                 
@@ -437,7 +489,6 @@ if arquivo_enviado:
                 pdf.text(54, y_secao2 + 24, "da superficie da")
                 pdf.text(54, y_secao2 + 28, "folha foi atingida.")
                 
-                # Caixa Direita: Histograma Estatístico Espectro
                 v_classes = [deriva_atual, medias_atual, grandes_atual]
                 l_classes = ["Finas (<150um)", "Medias (150-300um)", "Grossas (>300um)"]
                 c_barras = [(235, 94, 85), (73, 190, 128), (69, 133, 242)]
@@ -457,8 +508,8 @@ if arquivo_enviado:
                     pdf.set_font("Arial", "B", 8.5)
                     pdf.text(183, y_secao2 + 6 + (i * 11), f"{v_classes[i]}%")
                 
-                # --- SEÇÃO 3: RECOMENDAÇÕES E INSIGHTS ---
-                pdf.set_y(168) # Aumentado para dar espaço confortável da seção anterior
+                # --- SEÇÃO 3: RECOMENDAÇÕES ---
+                pdf.set_y(168)
                 pdf.set_font("Arial", "B", 11)
                 pdf.set_text_color(40, 50, 60)
                 pdf.cell(0, 6, "4. Diagnostico de Campo e Engenharia de Calibracao", ln=True)
@@ -470,24 +521,20 @@ if arquivo_enviado:
                 texto_quadro = f"Recomendacoes de Manejo:\n[DERIVA] -> {rec_deriva}\n[DENSIDADE] -> {rec_densidade}"
                 pdf.multi_cell(180, 5, texto_quadro, border=1, fill=True)
                 
-                # --- SEÇÃO 4: CARTÃO DIGITALIZADO NA HORIZONTAL ---
-                pdf.set_y(202) # Posicionamento estratégico e espaçado
+                # --- SEÇÃO 4: CARTÃO DIGITALIZADO HORIZONTAL ---
+                pdf.set_y(202)
                 pdf.set_text_color(40, 50, 60)
                 pdf.set_font("Arial", "B", 11)
                 pdf.cell(0, 6, "5. Amostragem Digital de Alta Precisao (Cartao na Horizontal)", ln=True)
                 pdf.ln(3)
                 
                 if nome_arquivo in imagens_processadas:
-                    # Converte a matriz cv2 para o formato PIL Image
                     img_f = Image.fromarray(cv2.cvtColor(imagens_processadas[nome_arquivo]["focada_bgr"], cv2.COLOR_BGR2RGB))
-                    
-                    # MAGIA: Rotacionamos a imagem em 90 graus para deitá-la horizontalmente de forma perfeita
                     img_horizontal = img_f.rotate(90, expand=True)
                     
                     tmp = "tmp_laudo_premium_h.jpg"
                     img_horizontal.save(tmp, "JPEG", quality=95)
                     
-                    # Moldura cinza de suporte adaptada para o tamanho horizontal (proporcional ao seu cartão 30x80)
                     largura_alvo_pdf = 110
                     altura_alvo_pdf = 42
                     x_centralizado = (210 - largura_alvo_pdf) / 2
@@ -495,11 +542,10 @@ if arquivo_enviado:
                     pdf.set_fill_color(230, 235, 240)
                     pdf.rect(x_centralizado - 1, pdf.get_y() - 1, largura_alvo_pdf + 2, altura_alvo_pdf + 2, 'F')
                     
-                    # Insere o cartão deitado e perfeitamente simétrico
                     pdf.image(tmp, x=x_centralizado, y=pdf.get_y(), w=largura_alvo_pdf, h=altura_alvo_pdf)
                     if os.path.exists(tmp): os.remove(tmp)
                 
-                # Rodapé de Validade Científica afastado do conteúdo principal
+                # Rodapé
                 pdf.set_y(268)
                 pdf.set_draw_color(200, 200, 200)
                 pdf.line(15, pdf.get_y(), 195, pdf.get_y())
