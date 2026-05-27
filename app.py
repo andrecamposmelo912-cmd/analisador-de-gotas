@@ -355,14 +355,51 @@ if arquivo_enviado:
 
     with aba_upload:
         st.write("---")
-        st.markdown("### 📊 Dashboard de Resultados de Campo")
+        st.markdown("### 📊 Dashboard de Resultados de Campo (Padrão IAC)")
         dados_amostra = df_geral.iloc[0]
         
-        c_d1, c_d2, c_d3, c_d4 = st.columns(4)
-        c_d1.metric(label="💧 Diâmetro Mediano (DMV)", value=f"{dados_amostra['Dv0.5 / DMV (µm)']} µm")
-        c_d2.metric(label="📈 Densidade de Gotas", value=f"{dados_amostra['Densidade (gotas/cm²)']} g/cm²")
-        c_d3.metric(label="🎯 Cobertura do Alvo", value=f"{dados_amostra['Cobertura (%)']} %")
-        c_d4.metric(label="🔢 Total de Gotas", value=int(dados_amostra['Nº de Gotas']))
+        # 🧪 BLOCO DE ENGENHARIA DE APLICAÇÃO: TRIO DE DIÂMETROS + SPAN
+        c_v1, c_v2, c_v3, c_v4 = st.columns(4)
+        
+        with c_v1:
+            st.metric(
+                label="📉 Dv0.1 (Gotas Finas)", 
+                value=f"{dados_amostra['Dv0.1 (µm)']} µm",
+                help="10% do volume líquido pulverizado é composto por gotas menores que este diâmetro. Indicador de alta criticidade para potencial de DERIVA de calda."
+            )
+
+        with c_v2:
+            st.metric(
+                label="💧 Dv0.5 / DMV (Mediana)", 
+                value=f"{dados_amostra['Dv0.5 / DMV (µm)']} µm",
+                help="Diâmetro da Mediana Volumétrica. Indica que metade (50%) do volume total da calda aplicada é composto por gotas menores que este valor, e a outra metade por gotas maiores."
+            )
+
+        with c_v3:
+            st.metric(
+                label="📈 Dv0.9 (Gotas Grossas)", 
+                value=f"{dados_amostra['Dv0.9 (µm)']} µm",
+                help="90% do volume líquido pulverizado é composto por gotas menores que este tamanho. Indicador diretamente associado a riscos potenciais de ESCORRIMENTO no alvo."
+            )
+
+        with c_v4:
+            span_val = dados_amostra['Amplitude (SPAN)']
+            status_span = "🎯 Excelente" if span_val <= 1.0 else ("⚠️ Moderado" if span_val <= 1.4 else "🚨 Irregular")
+            
+            st.metric(
+                label="🎯 Amplitude Relativa (SPAN)", 
+                value=f"{span_val}",
+                delta=status_span,
+                delta_color="normal" if span_val <= 1.2 else "inverse",
+                help="Calculado por (Dv0.9 - Dv0.1) / Dv0.5. Avalia a homogeneidade estrutural do espectro de gotas. Quanto mais próximo de zero, mais uniforme é o tamanho das gotas geradas."
+            )
+
+        # LINHA INFERIOR COM AS MÉTRICAS OPERACIONAIS COMPLEMENTARES
+        st.write("")
+        c_op1, c_op2, c_op3 = st.columns(3)
+        c_op1.metric(label="🔢 Total de Gotas Contadas", value=int(dados_amostra['Nº de Gotas']))
+        c_op2.metric(label="📊 Densidade de Gotas", value=f"{dados_amostra['Densidade (gotas/cm²)']} g/cm²")
+        c_op3.metric(label="🎯 Cobertura Real do Alvo", value=f"{dados_amostra['Cobertura (%)']} %")
 
         st.info(f"📋 **Classificação Técnica Internacional (ASABE S572):** O espectro da sua calda gerou gotas do tipo **{classe_asabe_final}**.")
 
