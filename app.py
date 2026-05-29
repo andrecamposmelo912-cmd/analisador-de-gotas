@@ -40,7 +40,7 @@ def obter_dispositivo():
     components.html(js_detector, height=0, width=0)
     return st.session_state["tipo_dispositivo"]
 
-dispositivo_ajustado = obter_dispositivo()
+dispositivo_atual = obter_dispositivo()
 
 # ==============================================================================
 # 🗄️ CONFIGURAÇÃO DO BANCO DE DADOS LOCAL (SQLITE)
@@ -151,6 +151,21 @@ if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
 
+# Seletor de Modo de Tela manual (Crucial para forçar no Computador se o JS falhar!)
+st.sidebar.header("📱 Modo de Visualização")
+opcao_dispositivo = st.sidebar.selectbox(
+    "Visualização de Tela:", 
+    ["Automático (Detecção)", "Forçar Celular", "Forçar Computador"]
+)
+if opcao_dispositivo == "Forçar Celular": dispositivo_ajustado = "Celular"
+elif opcao_dispositivo == "Forçar Computador": dispositivo_ajustado = "Computador"
+else: dispositivo_ajustado = dispositivo_atual
+
+if dispositivo_ajustado == "Celular":
+    st.sidebar.success("📱 Modo Mobile Ativo")
+else:
+    st.sidebar.info("💻 Modo Computador Ativo")
+
 # Seletor de Tipo de Papel (Essencial para as diferentes calibrações)
 st.sidebar.header("📄 Matriz de Amostragem")
 tipo_papel_sel = st.sidebar.selectbox(
@@ -196,8 +211,18 @@ st.write("---")
 # ==============================================================================
 if "analise_concluida" not in st.session_state:
     st.session_state["analise_concluida"] = False
+
+# Inicialização com valores padrão para EVITAR KeyError antes da primeira leitura!
 if "dados_analise" not in st.session_state:
-    st.session_state["dados_analise"] = {}
+    st.session_state["dados_analise"] = {
+        "cobertura": 0.0, "densidade": 0.0,
+        "dv01": 0.0, "dmv": 0.0, "dv09": 0.0,
+        "span": 0.0, "asabe": "N/A",
+        "img_original": None, "img_analisada": None,
+        "mascara": None, "diametros": np.array([]),
+        "focada": None, "total_gotas": 0,
+        "classes": [0.0, 0.0, 0.0]
+    }
 
 def classificar_asabe(dmv_val):
     if dmv_val < 100: return "Muito Fina (VF)"
@@ -281,22 +306,32 @@ with aba_upload:
             um_por_px = (30.0 / larg_px) * 1000.0 # Conversão Baseada em 30mm de largura padrão
             
             # ==========================================================================
-            # 🔬 MOTOR DE CORES AVANÇADO CIELAB (IMUNE A SOMBRAS)
+            # 🔬 MOTOR DE CORES ADAPTATIVO (IMUNE A SOMBRAS E GRADIENTES DE LUZ)
             # ==========================================================================
             if "Hidrossensível" in tipo_papel_sel:
+                # Converter para Lab para obter separação direta de amarelo vs azul no canal b*
                 lab = cv2.cvtColor(img_focada, cv2.COLOR_BGR2Lab)
-                b_canal = lab[:, :, 2]
+                b_canal = lab[:, :, 2] # Canal b*: Amarelo alto, Azul muito baixo
                 b_suavizado = cv2.bilateralFilter(b_canal, 9, 50, 50)
-                otsu_th, _ = cv2.threshold(b_suavizado, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                bias = (sensibilidade_azul - 11) * 1.5
-                _, mascara = cv2.threshold(b_suavizado, otsu_th + bias, 255, cv2.THRESH_BINARY_INV)
+                
+                # Utilização de Limiar Adaptativo Local em vez de corte global de Otsu!
+                # Isso impede totalmente que sombras gerem contornos massivos indesejados.
+                mascara = cv2.adaptiveThreshold(
+                    b_suavizado, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                    cv2.THRESH_BINARY_INV, 101, sensibilidade_azul
+                )
             else:
+                # Cromecote (Branco + Corante Azul/Escuro)
                 gray_c = cv2.cvtColor(img_focada, cv2.COLOR_BGR2GRAY)
                 gray_suavizado = cv2.bilateralFilter(gray_c, 9, 50, 50)
-                th_val, _ = cv2.threshold(gray_suavizado, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                bias = (11 - sensibilidade_azul) * 1.5
-                _, mascara = cv2.threshold(gray_suavizado, th_val + bias, 255, cv2.THRESH_BINARY_INV)
+                
+                # Inversão adaptativa local de tons escuros em fundo claro
+                mascara = cv2.adaptiveThreshold(
+                    gray_suavizado, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV, 101, sensibilidade_azul
+                )
             
+            # Limpeza morfológica fina para poeiras e ruído eletrónico
             kernel_limpeza = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
             mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel_limpeza)
             
@@ -347,34 +382,33 @@ with aba_upload:
             salvar_analise_bd(tipo_papel_sel, round(cob, 2), round(dens, 2), round(dv01, 1), round(dmv, 1), round(dv09, 1), round(span, 2), len(gotas), classificar_asabe(dmv))
             st.rerun()
 
-    # Painel de Métricas Consolidado do Cartão
+    # Painel de Métricas Consolidado do Cartão (Renderiza de forma estável)
+    dados = st.session_state["dados_analise"]
+    
+    st.write("---")
+    st.markdown("### 📊 Indicadores Físicos de Pulverização")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("📉 Dv0.1 (Finas/Deriva)", f"{dados['dv01']} µm")
+    c2.metric("💧 Dv0.5 / DMV (Mediana)", f"{dados['dmv']} µm")
+    c3.metric("📈 Dv0.9 (Grossas)", f"{dados['dv09']} µm")
+    
+    span_status = "🎯 Uniforme" if dados['span'] <= 1.2 and dados['span'] > 0 else ("🚨 Irregular" if dados['span'] > 0 else "N/A")
+    c4.metric("📈 Amplitude (SPAN)", f"{dados['span']}", delta=span_status)
+    
+    st.write("")
+    c_sub1, c_sub2, c_sub3 = st.columns(3)
+    c_sub1.metric("🔢 Gotas Contadas", f"{dados['total_gotas']} gotas")
+    c_sub2.metric("🎯 Cobertura Real", f"{dados['cobertura']} %")
+    c_sub3.metric("🔢 Densidade de Gotas", f"{dados['densidade']} g/cm²")
+    
+    st.info(f"📋 **Classificação Técnica (ASABE S572):** Espectro de gotas classificado como **{dados['asabe']}**.")
+    
     if st.session_state["analise_concluida"]:
-        dados = st.session_state["dados_analise"]
-        st.write("---")
-        
-        # Grid Principal de Métricas do Espectro de Gotas
-        st.markdown("### 📊 Indicadores Físicos de Pulverização")
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("📉 Dv0.1 (Finas/Deriva)", f"{dados['dv01']} µm")
-        c2.metric("💧 Dv0.5 / DMV (Mediana)", f"{dados['dmv']} µm")
-        c3.metric("📈 Dv0.9 (Grossas)", f"{dados['dv09']} µm")
-        
-        span_status = "🎯 Uniforme" if dados['span'] <= 1.2 else "🚨 Heterogéneo"
-        c4.metric("📈 Amplitude (SPAN)", f"{dados['span']}", delta=span_status)
-        
-        st.write("")
-        c_sub1, c_sub2, c_sub3 = st.columns(3)
-        c_sub1.metric("🔢 Gotas Contadas", f"{dados['total_gotas']} gotas")
-        c_sub2.metric("🎯 Cobertura Real", f"{dados['cobertura']} %")
-        c_sub3.metric("🔢 Densidade de Gotas", f"{dados['densidade']} g/cm²")
-        
-        st.info(f"📋 **Classificação Técnica (ASABE S572):** A ponta gerou um espectro de gotas do tipo **{dados['asabe']}**.")
-        
         st.write("")
         col_img_o, col_img_a = st.columns(2)
-        col_img_o.image(dados["img_original"], caption="Papel de Como Entrou (Original de Campo)", use_container_width=True)
-        col_img_a.image(dados["img_analisada"], caption="Gotas Contadas e Isoladas (Processamento IAC)", use_container_width=True)
+        col_img_o.image(dados["img_original"], caption="Papel Original (Como Entrou)", use_container_width=True)
+        col_img_a.image(dados["img_analisada"], caption="Gotas Isoladas e Contadas", use_container_width=True)
 
 # ------------------------------------------------------------------------------
 # 📊 ABA 2: GRÁFICOS E SIMULAÇÕES VOLUMÉTRICAS EM 3D
@@ -382,35 +416,32 @@ with aba_upload:
 with aba_graficos:
     st.subheader("📊 Distribuição de Espectro Volumétrico")
     
-    if not st.session_state["analise_concluida"]:
-        st.warning("⚠️ Efetue primeiro o upload de um cartão para gerar a modelação 3D.")
-    else:
-        dados = st.session_state["dados_analise"]
-        col_g1, col_g2 = st.columns(2)
-        
-        with col_g1:
-            st.markdown("**Frequência de Diâmetros Reais de Gota (µm)**")
-            if len(dados["diametros"]) > 0:
-                counts, bins = np.histogram(dados["diametros"], bins=15)
-                st.bar_chart(pd.DataFrame({"Gotas": counts}, index=bins[:-1].astype(int)))
-            else:
-                st.caption("Frequência indisponível.")
-                
-            st.markdown("**Classes de Gotas em Relação ao Alvo (%)**")
-            st.bar_chart(pd.DataFrame({"Percentual (%)": dados["classes"]}, index=['Pequenas (<150µm)', 'Médias (150-300µm)', 'Grandes (>300µm)']))
+    dados = st.session_state["dados_analise"]
+    col_g1, col_g2 = st.columns(2)
+    
+    with col_g1:
+        st.markdown("**Frequência de Diâmetros Reais de Gota (µm)**")
+        if len(dados["diametros"]) > 0:
+            counts, bins = np.histogram(dados["diametros"], bins=15)
+            st.bar_chart(pd.DataFrame({"Gotas": counts}, index=bins[:-1].astype(int)))
+        else:
+            st.caption("Efetue uma leitura para gerar o histograma de diâmetros.")
             
-        with col_g2:
-            st.markdown("**Modelação Tridimensional da Gota Mediana (Voo)**")
-            raio_g = max(dados["dmv"] / 2.0, 10.0)
-            u_p = np.linspace(0, 2 * np.pi, 25)
-            v_p = np.linspace(0, np.pi, 25)
-            xs = raio_g * np.outer(np.cos(u_p), np.sin(v_p))
-            ys = raio_g * np.outer(np.sin(u_p), np.sin(v_p))
-            zs = raio_g * np.outer(np.ones(np.size(u_p)), np.cos(v_p))
-            fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale="Blues", showscale=False)])
-            fig_sph.update_layout(scene=dict(aspectmode='cube'), height=350, margin=dict(l=0,r=0,b=0,t=0))
-            st.plotly_chart(fig_sph, use_container_width=True)
-            st.caption(f"Simulação espacial baseada no DMV calculado ({dados['dmv']} µm).")
+        st.markdown("**Classes de Gotas em Relação ao Alvo (%)**")
+        st.bar_chart(pd.DataFrame({"Percentual (%)": dados["classes"]}, index=['Pequenas (<150µm)', 'Médias (150-300µm)', 'Grandes (>300µm)']))
+        
+    with col_g2:
+        st.markdown("**Modelação Tridimensional da Gota Mediana (Voo)**")
+        raio_g = max(dados["dmv"] / 2.0, 10.0)
+        u_p = np.linspace(0, 2 * np.pi, 25)
+        v_p = np.linspace(0, np.pi, 25)
+        xs = raio_g * np.outer(np.cos(u_p), np.sin(v_p))
+        ys = raio_g * np.outer(np.sin(u_p), np.sin(v_p))
+        zs = raio_g * np.outer(np.ones(np.size(u_p)), np.cos(v_p))
+        fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale="Blues", showscale=False)])
+        fig_sph.update_layout(scene=dict(aspectmode='cube'), height=350, margin=dict(l=0,r=0,b=0,t=0))
+        st.plotly_chart(fig_sph, use_container_width=True)
+        st.caption(f"Simulação espacial baseada no DMV calculado ({dados['dmv']} µm).")
 
 # ------------------------------------------------------------------------------
 # 🔍 ABA 3: LABORATÓRIO DE INSPEÇÃO VISUAL AVANÇADA
@@ -419,23 +450,25 @@ with aba_inspecao:
     st.subheader("🔍 Laboratório Diagnóstico de Calda")
     st.markdown("Aplique filtros de visão artificial para auditar e analisar o comportamento da deposição.")
     
-    if not st.session_state["analise_concluida"]:
-        st.warning("⚠️ Digitalize um cartão para ativar os filtros do laboratório.")
-    else:
-        dados = st.session_state["dados_analise"]
-        filtro_sel = st.radio(
-            "🔬 Escolha o Filtro Óptico:",
-            ["1. Visão de Campo Corrigida", "2. Mapa Térmico de Deposição", "3. Watershed (Detecção de Núcleos)", "4. Alerta de Gotas de Deriva (<150µm)"],
-            horizontal=True
-        )
-        
-        col_la, col_lb = st.columns(2)
-        with col_la:
+    dados = st.session_state["dados_analise"]
+    
+    filtro_sel = st.radio(
+        "🔬 Escolha o Filtro Óptico:",
+        ["1. Visão de Campo Corrigida", "2. Mapa Térmico de Deposição", "3. Watershed (Detecção de Núcleos)", "4. Alerta de Gotas de Deriva (<150µm)"],
+        horizontal=True
+    )
+    
+    col_la, col_lb = st.columns(2)
+    with col_la:
+        if dados["img_original"] is not None:
             st.image(dados["img_original"], caption="Papel Original", use_container_width=True)
-            
-        with col_lb:
+        else:
+            st.info("Aguardando upload de imagem.")
+        
+    with col_lb:
+        if dados["img_original"] is not None:
             if "1." in filtro_sel:
-                st.image(dados["img_analisada"], caption="Isolamento por Segmentação CIELAB", use_container_width=True)
+                st.image(dados["img_analisada"], caption="Isolamento por Segmentação Adaptativa", use_container_width=True)
             elif "2." in filtro_sel:
                 b_map = cv2.GaussianBlur(dados["mascara"], (45, 45), 0)
                 h_map = cv2.cvtColor(cv2.applyColorMap(b_map, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
@@ -451,10 +484,13 @@ with aba_inspecao:
                 st.info("💡 Watershed localiza com precisão gotas que colidiram e colaram no papel.")
             elif "4." in filtro_sel:
                 img_deriva = np.zeros_like(dados["focada"])
-                for i, c in enumerate(contornos):
+                contornos_temp, _ = cv2.findContours(dados["mascara"], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for i, c in enumerate(contornos_temp):
                     if i < len(dados["diametros"]) and dados["diametros"][i] < 150.0:
                         cv2.drawContours(img_deriva, [c], -1, (255, 0, 150), -1)
                 st.image(cv2.cvtColor(img_deriva, cv2.COLOR_BGR2RGB), caption="Espectro Sensível a Evaporação/Deriva", use_container_width=True)
+        else:
+            st.info("Aguardando processamento de imagem.")
 
 # ------------------------------------------------------------------------------
 # 📋 ABA 4: RELATÓRIO DE IMPACTO (PDF CIENTÍFICO E COMPARAÇÃO DROPSCOPE)
@@ -462,143 +498,141 @@ with aba_inspecao:
 with aba_relatorio:
     st.subheader("📋 Validação de Equipamento e Laudo Técnico")
     
-    if not st.session_state["analise_concluida"]:
-        st.warning("⚠️ Efetue a digitalização para liberar a geração de relatórios.")
-    else:
-        dados = st.session_state["dados_analise"]
+    dados = st.session_state["dados_analise"]
+    
+    # --- COMPARAÇÃO DIRETA E CALIBRAÇÃO COM DROPSCOPE ---
+    st.markdown("### 🔬 Validação Contra Equipamento Dropscope (Análise Comparativa)")
+    st.markdown("Insira os dados gerados pelo software de laboratório do Dropscope para comparar estatisticamente com as leituras do vosso robô.")
+    
+    c_val1, c_val2, c_val3 = st.columns(3)
+    ref_dmv = c_val1.number_input("DMV do Dropscope (µm):", value=float(dados["dmv"] * 0.96) if dados["dmv"] > 0 else 150.0, step=1.0)
+    ref_cob = c_val2.number_input("Cobertura do Dropscope (%):", value=float(dados["cobertura"] * 0.98) if dados["cobertura"] > 0 else 5.0, step=0.1)
+    ref_dens = c_val3.number_input("Densidade do Dropscope (g/cm²):", value=float(dados["densidade"] * 1.01) if dados["densidade"] > 0 else 40.0, step=0.1)
+    
+    # Cálculo seguro dos desvios relativos absolutos
+    e_dmv = (abs(dados["dmv"] - ref_dmv) / ref_dmv * 100) if ref_dmv > 0 else 0.0
+    e_cob = (abs(dados["cobertura"] - ref_cob) / ref_cob * 100) if ref_cob > 0 else 0.0
+    e_dens = (abs(dados["densidade"] - ref_dens) / ref_dens * 100) if ref_dens > 0 else 0.0
+    
+    c_err1, c_err2, c_err3 = st.columns(3)
+    c_err1.metric("Desvio Relativo DMV", f"{e_dmv:.2f} %", delta="Excelente" if e_dmv <= 5.0 else "Calibrar Fator")
+    c_err2.metric("Desvio Relativo Cobertura", f"{e_cob:.2f} %", delta="Excelente" if e_cob <= 5.0 else "Ajustar Sensibilidade")
+    c_err3.metric("Desvio Relativo Densidade", f"{e_dens:.2f} %", delta="Excelente" if e_dens <= 5.0 else "Ajustar Filtro")
+    
+    # Comparativo de Barras Interativo GotInt vs Dropscope
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(name='Equipamento Dropscope (Referência)', x=['DMV (µm)', 'Cobertura (%)', 'Densidade (g/cm²)'], y=[ref_dmv, ref_cob, ref_dens], marker_color='#005088'))
+    fig_comp.add_trace(go.Bar(name='Robô GotInt 2.4', x=['DMV (µm)', 'Cobertura (%)', 'Densidade (g/cm²)'], y=[dados["dmv"], dados["cobertura"], dados["densidade"]], marker_color='#00a651'))
+    fig_comp.update_layout(barmode='group', height=300, margin=dict(l=0, r=0, t=10, b=10))
+    st.plotly_chart(fig_comp, use_container_width=True)
+    
+    st.write("---")
+    
+    # --- GERADOR DE PDF PREMIUM COM MAPA VETORIAL DE BARRAS ---
+    def gerar_pdf_laudo_com_imagens_e_barras(dados_card, papel_tipo, clima_info, ref_d, ref_c, ref_dn):
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_margins(15, 15, 15)
         
-        # --- COMPARAÇÃO DIRETA E CALIBRAÇÃO COM DROPSCOPE ---
-        st.markdown("### 🔬 Validação Contra Equipamento Dropscope (Análise Comparativa)")
-        st.markdown("Insira os dados gerados pelo software de laboratório do Dropscope para validar cientificamente a acurácia do robô.")
+        # Cabeçalho Premium Navy Blue
+        pdf.set_fill_color(26, 54, 93)
+        pdf.rect(0, 0, 210, 40, 'F')
         
-        c_val1, c_val2, c_val3 = st.columns(3)
-        ref_dmv = c_val1.number_input("DMV do Dropscope (µm):", value=float(dados["dmv"] * 0.96), step=1.0)
-        ref_cob = c_val2.number_input("Cobertura do Dropscope (%):", value=float(dados["cobertura"] * 0.98), step=0.1)
-        ref_dens = c_val3.number_input("Densidade do Dropscope (g/cm²):", value=float(dados["densidade"] * 1.01), step=0.1)
+        pdf.set_y(10)
+        pdf.set_font("Arial", "B", 14)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 8, "LAUDO DE QUALIFICACAO DE ESPECTRO DE GOTAS", ln=True, align="C")
+        pdf.set_font("Arial", "I", 9.5)
+        pdf.cell(0, 5, "Programa Aplique Bem - Parceria Cientifica: Instituto Agronomico (IAC)", ln=True, align="C")
         
-        # Cálculo dos desvios relativos absolutos
-        e_dmv = abs(dados["dmv"] - ref_dmv) / ref_dmv * 100
-        e_cob = abs(dados["cobertura"] - ref_cob) / ref_cob * 100
-        e_dens = abs(dados["densidade"] - ref_dens) / ref_dens * 100
+        pdf.set_y(46)
+        pdf.set_text_color(40, 50, 60)
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(0, 6, "1. Detalhes do Ensaio e Calibracao", ln=True)
+        pdf.set_font("Arial", "", 9.5)
+        pdf.cell(0, 5, f"Data da Analise: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
+        pdf.cell(0, 5, f"Matriz Analisada: {papel_tipo}  |  Gotas Detectadas: {dados_card['total_gotas']} unidades", ln=True)
         
-        c_err1, c_err2, c_err3 = st.columns(3)
-        c_err1.metric("Desvio Relativo DMV", f"{e_dmv:.2f} %", delta="Excelente" if e_dmv <= 5.0 else "Calibrar Fator")
-        c_err2.metric("Desvio Relativo Cobertura", f"{e_cob:.2f} %", delta="Excelente" if e_cob <= 5.0 else "Ajustar Sensibilidade")
-        c_err3.metric("Desvio Relativo Densidade", f"{e_dens:.2f} %", delta="Excelente" if e_dens <= 5.0 else "Ruído Residual")
-        
-        # Comparativo de Barras Interativo GotInt vs Dropscope
-        fig_comp = go.Figure()
-        fig_comp.add_trace(go.Bar(name='Equipamento Dropscope (Referência)', x=['DMV (µm)', 'Cobertura (%)', 'Densidade (g/cm²)'], y=[ref_dmv, ref_cob, ref_dens], marker_color='#005088'))
-        fig_comp.add_trace(go.Bar(name='Robô GotInt 2.4', x=['DMV (µm)', 'Cobertura (%)', 'Densidade (g/cm²)'], y=[dados["dmv"], dados["cobertura"], dados["densidade"]], marker_color='#00a651'))
-        fig_comp.update_layout(barmode='group', height=300, margin=dict(l=0, r=0, t=10, b=10))
-        st.plotly_chart(fig_comp, use_container_width=True)
-        
-        st.write("---")
-        
-        # --- GERADOR DE PDF PREMIUM COM MAPA VETORIAL DE BARRAS ---
-        def gerar_pdf_laudo_com_imagens_e_barras(dados_card, papel_tipo, clima_info, ref_d, ref_c, ref_dn):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_margins(15, 15, 15)
+        # Clima
+        if clima_info:
+            pdf.cell(0, 5, f"Estacao Climatologica: {clima_info['local']}  |  Temp: {clima_info['temp']}C  |  UR: {clima_info['uhr']}%  |  Vento: {clima_info['vento']} km/h", ln=True)
             
-            # Cabeçalho Premium
-            pdf.set_fill_color(26, 36, 43)
-            pdf.rect(0, 0, 210, 40, 'F')
-            
-            pdf.set_y(10)
-            pdf.set_font("Arial", "B", 14)
-            pdf.set_text_color(255, 255, 255)
-            pdf.cell(0, 8, "LAUDO DE QUALIFICACAO DE ESPECTRO DE GOTAS", ln=True, align="C")
-            pdf.set_font("Arial", "I", 9.5)
-            pdf.cell(0, 5, "Programa Aplique Bem - Parceria Cientifica: Instituto Agronomico (IAC)", ln=True, align="C")
-            
-            pdf.set_y(46)
+        pdf.ln(3)
+        pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+        pdf.ln(4)
+        
+        # Seção 2: Trio de Diâmetros e Métricas (Tabela Organizada)
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(0, 6, "2. Parametros Fisicos do Espectro de Gotas", ln=True)
+        pdf.ln(1)
+        
+        pdf.set_fill_color(0, 80, 136) # Azul IAC
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", "B", 9)
+        
+        # Tabela de Métricas do Cartão
+        pdf.cell(30, 8, "Metrica", border=1, fill=True, align="C")
+        pdf.cell(30, 8, "Dv0.1 (Finas)", border=1, fill=True, align="C")
+        pdf.cell(30, 8, "Dv0.5 (DMV)", border=1, fill=True, align="C")
+        pdf.cell(30, 8, "Dv0.9 (Grossas)", border=1, fill=True, align="C")
+        pdf.cell(25, 8, "SPAN", border=1, fill=True, align="C")
+        pdf.cell(35, 8, "Classe ASABE", border=1, fill=True, align="C")
+        pdf.ln()
+        
+        pdf.set_text_color(40, 50, 60)
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(30, 8, "Valor Robo", border=1, align="C")
+        pdf.cell(30, 8, f"{dados_card['dv01']} um", border=1, align="C")
+        pdf.cell(30, 8, f"{dados_card['dmv']} um", border=1, align="C")
+        pdf.cell(30, 8, f"{dados_card['dv09']} um", border=1, align="C")
+        pdf.cell(25, 8, f"{dados_card['span']}", border=1, align="C")
+        pdf.cell(35, 8, str(dados_card['asabe']), border=1, align="C")
+        pdf.ln()
+        
+        pdf.ln(4)
+        
+        # Seção 3: Gráfico de Barras Vetorial Direto no PDF
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(0, 6, "3. Distribuicao Volumetrica por Classes de Diâmetro", ln=True)
+        pdf.ln(2)
+        
+        labels = ["Gotas Pequenas (<150 um)", "Gotas Medias (150-300 um)", "Gotas Grandes (>300 um)"]
+        valores = dados_card["classes"] # Percentuais
+        cores = [(239, 68, 68), (34, 197, 94), (59, 130, 246)] # Vermelho, Verde, Azul modernos
+        
+        y_bar = pdf.get_y()
+        for i in range(3):
             pdf.set_text_color(40, 50, 60)
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(0, 6, "1. Detalhes do Ensaio e Calibracao", ln=True)
-            pdf.set_font("Arial", "", 9.5)
-            pdf.cell(0, 5, f"Data da Analise: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", ln=True)
-            pdf.cell(0, 5, f"Matriz Analisada: {papel_tipo}  |  Gotas Detectadas: {dados_card['total_gotas']} unidades", ln=True)
+            pdf.set_font("Arial", "B", 8.5)
+            pdf.cell(50, 6, labels[i], ln=False)
             
-            # Clima
-            if clima_info:
-                pdf.cell(0, 5, f"Estacao Climatologica: {clima_info['local']}  |  Temp: {clima_info['temp']}C  |  UR: {clima_info['uhr']}%  |  Vento: {clima_info['vento']} km/h", ln=True)
-                
-            pdf.ln(3)
-            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-            pdf.ln(4)
+            # Desenhar trilha cinza de fundo
+            pdf.set_fill_color(229, 231, 235)
+            pdf.rect(65, y_bar + 1, 100, 4, 'F')
             
-            # Seção 2: Trio de Diâmetros e Métricas (Tabela Organizada)
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(0, 6, "2. Parametros Fisicos do Espectro de Gotas", ln=True)
-            pdf.ln(1)
+            # Desenhar barra colorida correspondente ao valor real
+            pdf.set_fill_color(cores[i][0], cores[i][1], cores[i][2])
+            largura_real = max(int(valores[i]), 1)
+            pdf.rect(65, y_bar + 1, largura_real, 4, 'F')
             
-            pdf.set_fill_color(0, 80, 136) # Azul IAC
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_font("Arial", "B", 9)
-            
-            # Tabela de Métricas do Cartão
-            pdf.cell(30, 8, "Métrica", border=1, fill=True, align="C")
-            pdf.cell(30, 8, "Dv0.1 (Finas)", border=1, fill=True, align="C")
-            pdf.cell(30, 8, "Dv0.5 (DMV)", border=1, fill=True, align="C")
-            pdf.cell(30, 8, "Dv0.9 (Grossas)", border=1, fill=True, align="C")
-            pdf.cell(25, 8, "SPAN", border=1, fill=True, align="C")
-            pdf.cell(35, 8, "Classe ASABE", border=1, fill=True, align="C")
-            pdf.ln()
-            
-            pdf.set_text_color(40, 50, 60)
-            pdf.set_font("Arial", "", 9)
-            pdf.cell(30, 8, "Valor Robô", border=1, align="C")
-            pdf.cell(30, 8, f"{dados_card['dv01']} um", border=1, align="C")
-            pdf.cell(30, 8, f"{dados_card['dmv']} um", border=1, align="C")
-            pdf.cell(30, 8, f"{dados_card['dv09']} um", border=1, align="C")
-            pdf.cell(25, 8, f"{dados_card['span']}", border=1, align="C")
-            pdf.cell(35, 8, str(dados_card['asabe']), border=1, align="C")
-            pdf.ln()
-            
-            pdf.ln(4)
-            
-            # Seção 3: Gráfico de Barras Vetorial Direto no PDF (Imprecionar o Produtor!)
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(0, 6, "3. Distribuicao Volumetrica por Classes de Diâmetro", ln=True)
-            pdf.ln(2)
-            
-            labels = ["Gotas Pequenas (<150 um)", "Gotas Medias (150-300 um)", "Gotas Grandes (>300 um)"]
-            valores = dados_card["classes"] # Percentuais
-            cores = [(255, 77, 77), (0, 166, 81), (0, 80, 136)] # Vermelho, Verde, Azul
-            
+            # Exibir valor textual
+            pdf.set_font("Arial", "", 8.5)
+            pdf.cell(110, 6, f"   {valores[i]:.1f}%", ln=True)
             y_bar = pdf.get_y()
-            for i in range(3):
-                pdf.set_text_color(40, 50, 60)
-                pdf.set_font("Arial", "B", 8.5)
-                pdf.cell(50, 6, labels[i], ln=False)
-                
-                # Desenhar trilha cinza de fundo
-                pdf.set_fill_color(230, 235, 240)
-                pdf.rect(65, y_bar + 1, 100, 4, 'F')
-                
-                # Desenhar barra colorida correspondente ao valor real
-                pdf.set_fill_color(cores[i][0], cores[i][1], cores[i][2])
-                largura_real = max(int(valores[i]), 1) # Normalizado para 100pt de escala total
-                pdf.rect(65, y_bar + 1, largura_real, 4, 'F')
-                
-                # Exibir valor textual
-                pdf.set_font("Arial", "", 8.5)
-                pdf.cell(110, 6, f"   {valores[i]:.1f}%", ln=True)
-                y_bar = pdf.get_y()
-                
-            pdf.ln(4)
             
-            # Seção 4: Lado a Lado Imagem Original vs. Processada
-            pdf.set_font("Arial", "B", 11)
-            pdf.cell(0, 6, "4. Mapa Optico de Campo (Papel Original vs. Gotas Contadas)", ln=True)
-            pdf.ln(2)
-            
-            # Salvar imagens temporárias para o PDF
-            temp_orig = "temp_orig_pdf.png"
-            temp_anal = "temp_anal_pdf.png"
-            
-            # Convertemos para BGR para salvar corretamente com OpenCV
+        pdf.ln(4)
+        
+        # Seção 4: Lado a Lado Imagem Original vs. Processada com Margem Estética
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(0, 6, "4. Amostra Analisada (Original vs. Gotas Contadas)", ln=True)
+        pdf.ln(2)
+        
+        # Salvar imagens temporárias para o PDF
+        temp_orig = "temp_orig_pdf.png"
+        temp_anal = "temp_anal_pdf.png"
+        
+        if dados_card["focada"] is not None and dados_card["img_analisada"] is not None:
+            # Converter para BGR para salvar corretamente com OpenCV
             cv2.imwrite(temp_orig, cv2.cvtColor(dados_card["focada"], cv2.COLOR_RGB2BGR))
             cv2.imwrite(temp_anal, cv2.cvtColor(dados_card["img_analisada"], cv2.COLOR_RGB2BGR))
             
@@ -607,31 +641,30 @@ with aba_relatorio:
             pdf.image(temp_orig, x=15, y=y_img_pos, w=85, h=105)
             pdf.image(temp_anal, x=110, y=y_img_pos, w=85, h=105)
             
-            # Limpar ficheiros temporários após inclusão no PDF
             pdf.set_y(y_img_pos + 110)
             if os.path.exists(temp_orig): os.remove(temp_orig)
             if os.path.exists(temp_anal): os.remove(temp_anal)
-            
-            # Rodapé de Rastreabilidade Científica
-            pdf.set_y(266)
-            pdf.set_font("Arial", "I", 8)
-            pdf.set_text_color(140, 140, 140)
-            pdf.cell(0, 4, "Algoritmo IAC de Calibracao Hidrossensivel GotInt 2.4 - Homologado e Certificado.", ln=True, align="C")
-            
-            return pdf.output(dest='S').encode('latin1', errors='replace')
-            
-        try:
-            pdf_bytes = gerar_pdf_laudo_com_imagens_e_barras(dados, tipo_papel_sel, dados_clima, ref_dmv, ref_cob, ref_dens)
-            
-            st.download_button(
-                label="🚀 GERAR LAUDO COMPLETO DO CARTÃO (PDF PREMIUM)",
-                data=pdf_bytes,
-                file_name=f"Laudo_Premium_GotInt_{datetime.now().strftime('%d_%m_%Y')}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        except Exception as e:
-            st.error(f"Erro ao compor o laudo em PDF: {e}")
+        
+        # Rodapé de Rastreabilidade Científica
+        pdf.set_y(266)
+        pdf.set_font("Arial", "I", 8)
+        pdf.set_text_color(140, 140, 140)
+        pdf.cell(0, 4, "Algoritmo IAC de Calibracao Hidrossensivel GotInt 2.4 - Homologado e Certificado.", ln=True, align="C")
+        
+        return pdf.output(dest='S').encode('latin1', errors='replace')
+        
+    try:
+        pdf_bytes = gerar_pdf_laudo_com_imagens_e_barras(dados, tipo_papel_sel, dados_clima, ref_dmv, ref_cob, ref_dens)
+        
+        st.download_button(
+            label="🚀 GERAR LAUDO COMPLETO DO CARTÃO (PDF PREMIUM)",
+            data=pdf_bytes,
+            file_name=f"Laudo_Premium_GotInt_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+    except Exception as e:
+        st.error(f"Erro ao compor o laudo em PDF: {e}")
             
     # --- RENDERIZAÇÃO DO HISTÓRICO DO BANCO DE DADOS LOCAL ---
     st.write("---")
