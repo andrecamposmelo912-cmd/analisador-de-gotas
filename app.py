@@ -13,13 +13,13 @@ from fpdf import FPDF
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 
-# Registra o suporte a arquivos HEIC/HEIF do iPhone
+# Suporte global HEIC/HEIF
 register_heif_opener()
 
-st.set_page_config(page_title="Gota Inteligente - IAC & Aplique Bem", page_icon="💧", layout="wide")
+st.set_page_config(page_title="GotInt 2.4 - IAC & Aplique Bem", page_icon="💧", layout="wide")
 
 # ==============================================================================
-# 📱 DETECÇÃO DE DISPOSITIVO SEGURA (JAVASCRIPT BROWSER)
+# 📱 DETECÇÃO DE DISPOSITIVO SEGURA (JAVASCRIPT)
 # ==============================================================================
 def obter_dispositivo():
     js_detector = """
@@ -27,7 +27,6 @@ def obter_dispositivo():
         const renderContext = window.parent || window;
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
                          || (window.innerWidth <= 768);
-        
         if (renderContext.postMessage) {
             renderContext.postMessage({
                 type: 'streamlit:setComponentValue',
@@ -38,11 +37,10 @@ def obter_dispositivo():
     """
     if "tipo_dispositivo" not in st.session_state:
         st.session_state["tipo_dispositivo"] = "Computador"
-        
     components.html(js_detector, height=0, width=0)
     return st.session_state["tipo_dispositivo"]
 
-dispositivo_atual = obter_dispositivo()
+dispositivo_ajustado = obter_dispositivo()
 
 # ==============================================================================
 # 🗄️ CONFIGURAÇÃO DO BANCO DE DADOS LOCAL (SQLITE)
@@ -56,10 +54,9 @@ def inicializar_banco():
         CREATE TABLE IF NOT EXISTS historico_analises (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             data_hora TEXT,
-            arquivo TEXT,
-            tipo_cartao TEXT,
+            cultura TEXT,
+            posicao TEXT,
             cobertura REAL,
-            num_gotas INTEGER,
             densidade REAL,
             dmv REAL,
             span REAL,
@@ -69,21 +66,24 @@ def inicializar_banco():
     conn.commit()
     conn.close()
 
-def salvar_analise_bd(arquivo, tipo, cob, gotas, dens, dmv, span, classe):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    cursor.execute("""
-        INSERT INTO historico_analises (data_hora, arquivo, tipo_cartao, cobertura, num_gotas, densidade, dmv, span, classe_asabe)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (agora, arquivo, tipo, cob, gotas, dens, dmv, span, classe))
-    conn.commit()
-    conn.close()
+def salvar_analise_bd(cultura, posicao, cob, dens, dmv, span, classe):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        cursor.execute("""
+            INSERT INTO historico_analises (data_hora, cultura, posicao, cobertura, densidade, dmv, span, classe_asabe)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (agora, cultura, posicao, cob, dens, dmv, span, classe))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.sidebar.error(f"Erro ao salvar no BD: {e}")
 
 inicializar_banco()
 
 # ==============================================================================
-# 🖼️ CONFIGURAÇÃO DOS LOGOTIPOS LOCAIS
+# 🖼️ LOGOTIPOS INSTITUCIONAIS
 # ==============================================================================
 CAMINHO_LOGO_IAC = "logo_iac.png.png" 
 CAMINHO_LOGO_APLIQUEBEM = "logo_aplique.png.jpg"
@@ -98,7 +98,7 @@ img_iac = carregar_logo(CAMINHO_LOGO_IAC)
 img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 
 # ==============================================================================
-# 🔐 ACESSO RESTRITO (USUÁRIOS HOMOLOGADOS)
+# 🔐 ACESSO RESTRITO
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
     "andre": "iaciac", "manoel": "iaciac", "hamilton": "iaciac", "iac": "apliquebem2026"
@@ -114,55 +114,58 @@ if not st.session_state["autenticado"]:
         l1, l2 = st.columns(2)
         if img_iac: l1.image(img_iac, width=200) 
         if img_aplique: l2.image(img_aplique, width=220)
-        st.markdown("<h2 style='text-align: center; color: #005088;'>🔒 Gota Inteligente - Acesso Restrito</h2>", unsafe_allow_html=True)
-        usuario_input = st.text_input("Usuário de Acesso:", key="user_login")
-        senha_input = st.text_input("Senha de Segurança:", type="password", key="password_login")
+        st.markdown("<h2 style='text-align: center; color: #005088;'>🔒 GotInt 2.4 - Acesso Restrito</h2>", unsafe_allow_html=True)
+        usuario_input = st.text_input("Utilizador de Acesso:", key="user_login")
+        senha_input = st.text_input("Palavra-passe de Segurança:", type="password", key="password_login")
         if st.button("🔑 Verificar Autorização", use_container_width=True):
             if usuario_input in USUARIOS_AUTORIZADOS and USUARIOS_AUTORIZADOS[usuario_input] == senha_input:
                 st.session_state["autenticado"] = True
                 st.rerun()
-            else: st.error("❌ Credenciais incorretas.")
+            else: st.error("❌ Credenciais incorrectas.")
     st.stop()
 
 # ==============================================================================
-# 💧 METEOROLOGIA AUTOMÁTICA POR CIDADE
+# 💧 METEOROLOGIA AUTOMÁTICA
 # ==============================================================================
 def buscar_clima_cidade(nome_cidade):
     try:
         url_geo = f"https://geocoding-api.open-meteo.com/v1/search?name={nome_cidade}&count=1&language=pt"
         res_geo = requests.get(url_geo).json()
         if not res_geo.get("results"): return None
-        
         loc = res_geo["results"][0]
         lat, lon = loc["latitude"], loc["longitude"]
-        nome_completo = f"{loc['name']}, {loc.get('admin1', '')}"
-        
         url_clima = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m"
         res_clima = requests.get(url_clima).json()["current"]
-        
         return {
-            "local": nome_completo,
+            "local": f"{loc['name']}, {loc.get('admin1', '')}",
             "temp": res_clima["temperature_2m"],
             "uhr": res_clima["relative_humidity_2m"],
             "vento": res_clima["wind_speed_10m"]
         }
-    except:
-        return None
+    except: return None
 
-# Sidebar estrutural
+# Sidebar estrutural do sistema
 if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
 
-opcao_dispositivo = st.sidebar.selectbox("Visualização de Tela:", ["Automático (Detecção)", "Forçar Celular", "Forçar Computador"])
-if opcao_dispositivo == "Forçar Celular": dispositivo_ajustado = "Celular"
-elif opcao_dispositivo == "Forçar Computador": dispositivo_ajustado = "Computador"
-else: dispositivo_ajustado = dispositivo_atual
+# Painel de Calibração Lateral
+st.sidebar.header("🔬 Calibração de Visão (IAC)")
+sensibilidade_azul = st.sidebar.slider(
+    "Sensibilidade de Captura (Tons de Azul)", 
+    min_value=1, max_value=25, value=11, step=2,
+    help="Valores menores detectam mais gotas claras; valores maiores evitam ruído."
+)
+fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", 1.0, 3.0, 2.0, 0.1)
 
-if dispositivo_ajustado == "Celular":
-    st.sidebar.success("📱 Modo Mobile: Otimizado para Campo")
-else:
-    st.sidebar.info("💻 Modo Desktop: Otimizado para Computador")
+st.sidebar.markdown("---")
+st.sidebar.header("🌤️ Clima em Tempo Real")
+cidade_campo = st.sidebar.text_input("Cidade do Campo:", value="Campinas")
+dados_clima = buscar_clima_cidade(cidade_campo)
+if dados_clima:
+    st.sidebar.metric("Temperatura", f"{dados_clima['temp']} °C")
+    st.sidebar.metric("Humidade Relativa (UR)", f"{dados_clima['uhr']} %")
+    st.sidebar.metric("Velocidade do Vento", f"{dados_clima['vento']} km/h")
 
 if st.sidebar.button("🚪 Encerrar Sessão", use_container_width=True):
     st.session_state["autenticado"] = False
@@ -170,8 +173,8 @@ if st.sidebar.button("🚪 Encerrar Sessão", use_container_width=True):
 
 col_tit, col_logos_topo = st.columns([2, 1])
 with col_tit:
-    st.title("💧 Analisador de Gotas Inteligente")
-    st.markdown("**Parceria Científica:** Instituto Agronômico (IAC) & Programa Aplique Bem")
+    st.title("💧 Analisador de Gotas Inteligente 2.4")
+    st.markdown("**Parceria Científica:** Instituto Agronómico (IAC) & Programa Aplique Bem")
 with col_logos_topo:
     ct1, ct2 = st.columns(2)
     if img_iac: ct1.image(img_iac, width=80)
@@ -180,40 +183,14 @@ with col_logos_topo:
 st.write("---")
 
 # ==============================================================================
-# 🗄️ PAINEL LATERAL DE CALIBRAÇÃO DE IMAGEM (LABORATÓRIO IAC)
+# 📦 ESTADOS GLOBAIS DE SESSÃO E AUXILIARES
 # ==============================================================================
-st.sidebar.header("🔬 Calibração de Visão (IAC)")
-
-sensibilidade_azul = st.sidebar.slider(
-    "Sensibilidade de Captura (Tons de Azul)", 
-    min_value=1, max_value=25, value=11, step=2,
-    help="Controle de Limiar Adaptativo. Valores MENORES tornam a captura mais agressiva, detectando manchas e tons de azul extremamente claros. Valores MAIORES isolam apenas azuis intensos e evitam ruídos de papel úmido."
-)
-
-fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", 1.0, 3.0, 2.0, 0.1)
-
-st.sidebar.markdown("---")
-st.sidebar.header("🌤️ Clima em Tempo Real")
-cidade_campo = st.sidebar.text_input("Cidade do Campo / Propriedade:", value="Campinas")
-dados_clima = buscar_clima_cidade(cidade_campo)
-
-if dados_clima:
-    st.sidebar.caption(f"📍 {dados_clima['local']}")
-    st.sidebar.metric("Temperatura", f"{dados_clima['temp']} °C")
-    st.sidebar.metric("Umidade Relativa (UR)", f"{dados_clima['uhr']} %")
-    st.sidebar.metric("Velocidade do Vento", f"{dados_clima['vento']} km/h")
-else:
-    st.sidebar.warning("Cidade não localizada. Insira o nome correto.")
-
-aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
-    "📥 Captura e Resultados", "📊 Gráficos e Projeções 3D", "🔍 Inspeção de Cartões", "📋 Relatório e Histórico"
-])
-
-with aba_upload:
-    st.subheader("📸 Captura do Cartão Hidrossensível")
-    opcao_padrao = 0 if dispositivo_ajustado == "Celular" else 1
-    metodo_captura = st.radio("Inserção:", ["Usar a Câmera do Celular", "Enviar foto da Galeria"], index=opcao_padrao, horizontal=True)
-    arquivo_enviado = st.camera_input("Foto") if metodo_captura == "Usar a Câmera do Celular" else st.file_uploader("Arquivo", type=['jpg', 'jpeg', 'png', 'heic', 'heif'])
+if "analise_concluida" not in st.session_state:
+    st.session_state["analise_concluida"] = False
+if "dados_analise" not in st.session_state:
+    st.session_state["dados_analise"] = {}
+if "cultura_selecionada" not in st.session_state:
+    st.session_state["cultura_selecionada"] = "Cana-de-Açúcar"
 
 def classificar_asabe(dmv_val):
     if dmv_val < 100: return "Muito Fina (VF)"
@@ -223,382 +200,438 @@ def classificar_asabe(dmv_val):
     elif dmv_val <= 450: return "Muito Grossa (VC)"
     else: return "Extremamente Grossa (XC)"
 
-# ==============================================================================
-# 🧮 FUNÇÃO COMPLEMENTAR: ORDENAÇÃO DE PONTOS PARA A HOMOGRAFIA
-# ==============================================================================
 def ordenar_pontos(pts):
     pts = pts.reshape((4, 2))
     novos_pts = np.zeros((4, 2), dtype=np.float32)
     soma = pts.sum(axis=1)
-    novos_pts[0] = pts[np.argmin(soma)]  # Top-Left
-    novos_pts[2] = pts[np.argmax(soma)]  # Bottom-Right
+    novos_pts[0] = pts[np.argmin(soma)]
+    novos_pts[2] = pts[np.argmax(soma)]
     diff = np.diff(pts, axis=1)
-    novos_pts[1] = pts[np.argmin(diff)]  # Top-Right
-    novos_pts[3] = pts[np.argmax(diff)]  # Bottom-Left
+    novos_pts[1] = pts[np.argmin(diff)]
+    novos_pts[3] = pts[np.argmax(diff)]
     return novos_pts
 
-if arquivo_enviado:
-    resultados_gerais = []
-    dados_graficos = {}
-    imagens_processadas = {}
-    
-    nome_arquivo = getattr(arquivo_enviado, 'name', 'captura_camera.jpg')
-    extensao = nome_arquivo.split('.')[-1].lower()
-    
-    try:
-        if extensao in ['heic', 'heif']:
-            pil_img = Image.open(arquivo_enviado).convert("RGB")
-            img_original = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        else:
-            file_bytes = np.asarray(bytearray(arquivo_enviado.read()), dtype=np.uint8)
-            img_original = cv2.imdecode(file_bytes, 1)
-    except Exception as e:
-        st.error(f"Erro no processamento da imagem: {e}"); st.stop()
+# ==============================================================================
+# 🗺️ RENDERIZAÇÃO DAS 4 ABAS CLÁSSICAS DO SISTEMA
+# ==============================================================================
+aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
+    "📥 Captura e Resultados", "📊 Gráficos e Projeções 3D", "🔍 Inspeção de Cartões", "📋 Relatório e Histórico"
+])
 
-    if img_original is not None:
-        # Prepara detecção de bordas estruturais para retificar a perspectiva
-        gray = cv2.cvtColor(img_original, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-        edged = cv2.Canny(blurred, 40, 180)
+# ------------------------------------------------------------------------------
+# 📥 ABA 1: CAPTURA E RESULTADOS DE DOSSEL MULTI-PAPEL
+# ------------------------------------------------------------------------------
+with aba_upload:
+    st.subheader("🌱 Configuração do Ensaio / Arquitetura do Alvo")
+    cultura_sel = st.selectbox(
+        "Selecione a Cultura Agroindustrial:",
+        ["Cana-de-Açúcar", "Soja", "Milho", "Algodão", "Café", "Citros", "Hortifrúti"],
+        key="cultura_box_upload"
+    )
+    st.session_state["cultura_selecionada"] = cultura_sel
+    
+    with st.expander("📸 Envio de Ficheiros do Ensaio", expanded=not st.session_state["analise_concluida"]):
+        col_desenho, col_uploads = st.columns([1, 1])
         
-        contornos_fundo, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        img_focada = None
-        
-        # ==============================================================================
-        # 📐 IMPLEMENTAÇÃO: MATRIZ DE RECONSTRUÇÃO HOMOGRÁFICA (PERSPECTIVE WARP)
-        # ==============================================================================
-        if len(contornos_fundo) > 0:
-            contornos_fundo = sorted(contornos_fundo, key=cv2.contourArea, reverse=True)[:5]
-            for c in contornos_fundo:
-                perimetro = cv2.arcLength(c, True)
-                aproximacao = cv2.approxPolyDP(c, 0.02 * perimetro, True)
+        with col_desenho:
+            st.markdown(f"#### 📐 Diagrama de Posicionamento: **{st.session_state['cultura_selecionada']}**")
+            if st.session_state['cultura_selecionada'] == "Cana-de-Açúcar":
+                st.info("💡 **Diretriz IAC - Cana:** Posicione os cartões de forma estratégica:\n* **Topo:** No topo do colmo/folhas abertas.\n* **Meio:** Região mediana.\n* **Baixeiro:** Próximo à base/colmo inferior.")
+            elif st.session_state['cultura_selecionada'] == "Soja":
+                st.info("💡 **Diretriz IAC - Soja:** Atente-se ao fechamento das linhas.\n* **Topo:** Folhas superiores.\n* **Baixeiro:** Interior do dossel inferior.")
+            else:
+                st.info(f"💡 Colete amostras verticais no(a) {st.session_state['cultura_selecionada']}.")
+
+        with col_uploads:
+            st.markdown("#### Ficheiros de Amostras (Envie apenas os que coletou)")
+            img_topo = st.file_uploader("📥 Cartão 1: TOPO (Terço Superior)", type=['jpg','jpeg','png','heic','heif'], key="up_topo")
+            img_meio = st.file_uploader("📥 Cartão 2: MEIO (Terço Médio)", type=['jpg','jpeg','png','heic','heif'], key="up_meio")
+            img_baixo = st.file_uploader("📥 Cartão 3: BAIXEIRO (Terço Inferior)", type=['jpg','jpeg','png','heic','heif'], key="up_baixo")
+            
+            st.write("")
+            btn_analisar = st.button("🚀 INICIAR LEITURA DE DOSSEL", use_container_width=True, type="primary")
+            
+            if btn_analisar:
+                dict_imagens = {}
+                if img_topo: dict_imagens["Topo"] = img_topo
+                if img_meio: dict_imagens["Meio"] = img_meio
+                if img_baixo: dict_imagens["Baixeiro"] = img_baixo
                 
-                # Se achou 4 cantos estruturais do cartão, aplica o estiramento geométrico
-                if len(aproximacao) == 4 and cv2.contourArea(c) > (img_original.shape[0] * img_original.shape[1] * 0.10):
-                    pontos_ordenados = ordenar_pontos(aproximacao)
+                if not dict_imagens:
+                    st.warning("⚠️ Envie pelo menos um cartão hidrossensível para iniciar o processamento.")
+                else:
+                    resultados_temp = {}
                     
-                    # Define a proporção real de saída do cartão (Ex: 300x800 pixels esticados)
-                    largura_alvo = 400
-                    altura_alvo = 900
-                    
-                    pontos_destino = np.array([
-                        [0, 0],
-                        [largura_alvo - 1, 0],
-                        [largura_alvo - 1, altura_alvo - 1],
-                        [0, altura_alvo - 1]
-                    ], dtype=np.float32)
-                    
-                    # Calcula a matriz homográfica de correção perspectiva
-                    M_homografia = cv2.getPerspectiveTransform(pontos_ordenados, pontos_destino)
-                    img_focada = cv2.warpPerspective(img_original, M_homografia, (largura_alvo, altura_alvo))
-                    break
+                    for posicao, arq in dict_imagens.items():
+                        nome_arq = arq.name
+                        ext = nome_arq.split('.')[-1].lower()
+                        if ext in ['heic', 'heif']:
+                            pil_img = Image.open(arq).convert("RGB")
+                            img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                        else:
+                            file_bytes = np.asarray(bytearray(arq.read()), dtype=np.uint8)
+                            img_bgr = cv2.imdecode(file_bytes, 1)
+                            
+                        if img_bgr is not None:
+                            # 🎯 MOTOR RESILIENTE: FILTRO BILATERAL + DETECÇÃO GAUSSIANA ADAPTATIVA
+                            gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                            edged = cv2.Canny(blurred, 30, 150)
+                            contornos_fundo, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            
+                            img_focada = None
+                            if len(contornos_fundo) > 0:
+                                contornos_fundo = sorted(contornos_fundo, key=cv2.contourArea, reverse=True)[:5]
+                                for c in contornos_fundo:
+                                    perimetro = cv2.arcLength(c, True)
+                                    aproximacao = cv2.approxPolyDP(c, 0.02 * perimetro, True)
+                                    if len(aproximacao) == 4 and cv2.contourArea(c) > (img_bgr.shape[0] * img_bgr.shape[1] * 0.08):
+                                        pts_ord = ordenar_pontos(aproximacao)
+                                        M_homografia = cv2.getPerspectiveTransform(pts_ord, np.array([[0,0],[399,0],[399,899],[0,899]], dtype=np.float32))
+                                        img_focada = cv2.warpPerspective(img_bgr, M_homografia, (400, 900))
+                                        break
+                                        
+                            if img_focada is None:
+                                h_orig, w_orig = img_bgr.shape[:2]
+                                margem_h, margem_w = int(h_orig * 0.1), int(w_orig * 0.1)
+                                img_focada = img_bgr[margem_h:h_orig-margem_h, margem_w:w_orig-margem_w]
+                                img_focada = cv2.resize(img_focada, (400, 900))
+                                
+                            alt_px, larg_px = img_focada.shape[:2]
+                            area_tot_px = alt_px * larg_px
+                            um_por_px = (30.0 / larg_px) * 1000.0
+                            
+                            # Filtro Bilateral para eliminar fibras do papel amarelo
+                            img_filtrada = cv2.bilateralFilter(img_focada, 9, 75, 75)
+                            hsv = cv2.cvtColor(img_filtrada, cv2.COLOR_BGR2HSV)
+                            s_canal = hsv[:,:,1]
+                            
+                            mascara = cv2.adaptiveThreshold(
+                                s_canal, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                cv2.THRESH_BINARY, 61, sensibilidade_azul
+                            )
+                            
+                            if np.mean(mascara[:50, :50]) > 127:
+                                mascara = cv2.bitwise_not(mascara)
+                                
+                            contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                            gotas = [c for c in contornos if cv2.contourArea(c) > 2]
+                            
+                            cob = (cv2.countNonZero(mascara) / area_tot_px) * 100
+                            dens = len(gotas) / 24.0
+                            
+                            diametros = []
+                            volumes = []
+                            for c in gotas:
+                                area_c = cv2.contourArea(c)
+                                d_mancha = (2.0 * np.sqrt(area_c / np.pi)) * um_por_px
+                                d_real = d_mancha / fator_espalhamento
+                                diametros.append(d_real)
+                                volumes.append((4.0/3.0) * np.pi * ((d_real / 2.0) ** 3))
+                                
+                            if len(gotas) > 5:
+                                diametros = np.array(diametros)
+                                volumes = np.array(volumes)
+                                idx = np.argsort(diametros)
+                                frac_acum = np.cumsum(volumes[idx]) / np.sum(volumes)
+                                dv01 = float(np.interp(0.1, frac_acum, diametros[idx]))
+                                dmv = float(np.interp(0.5, frac_acum, diametros[idx]))
+                                dv09 = float(np.interp(0.9, frac_acum, diametros[idx]))
+                                span = (dv09 - dv01) / dmv if dmv > 0 else 0
+                                pequenas_perc = np.sum(diametros < 150) / len(gotas) * 100
+                                medias_perc = np.sum((diametros >= 150) & (diametros <= 300)) / len(gotas) * 100
+                                grandes_perc = np.sum(diametros > 300) / len(gotas) * 100
+                            else:
+                                dv01 = dmv = dv09 = span = pequenas_perc = medias_perc = grandes_perc = 0.0
+                                
+                            img_vis = cv2.cvtColor(img_focada.copy(), cv2.COLOR_BGR2RGB)
+                            cv2.drawContours(img_vis, gotas, -1, (255, 0, 0), 2)
+                            
+                            resultados_temp[posicao] = {
+                                "cobertura": round(cob, 2), "densidade": round(dens, 2),
+                                "dmv": round(dmv, 1), "span": round(span, 2), "asabe": classificar_asabe(dmv),
+                                "img_original": cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), 
+                                "img_analisada": img_vis, "mascara": mascara,
+                                "diametros": diametros, "focada": img_focada, "total_gotas": len(gotas),
+                                "classes": [pequenas_perc, medias_perc, grandes_perc]
+                            }
+                            
+                            salvar_analise_bd(st.session_state["cultura_selecionada"], posicao, round(cob, 2), round(dens, 2), round(dmv, 1), round(span, 2), classificar_asabe(dmv))
+                            
+                    st.session_state["dados_analise"] = resultados_temp
+                    st.session_state["analise_concluida"] = True
+                    st.rerun()
 
-        # Modo de contingência caso a foto esteja muito colada ou sem bordas visíveis
-        if img_focada is None:
-            img_focada = img_original.copy()
-            alt_f, larg_f = img_focada.shape[:2]
-            margem_y, margem_x = int(alt_f * 0.08), int(larg_f * 0.08)
-            if alt_f > (margem_y * 2) and larg_f > (margem_x * 2):
-                img_focada = img_focada[margem_y : alt_f - margem_y, margem_x : larg_f - margem_x]
-
-        altura_px, largura_px = img_focada.shape[:2]
-        area_total_pixels = altura_px * largura_px
-        area_cartao_cm2 = (30.0 / 10.0) * (80.0 / 10.0)
-        um_por_pixel = (30.0 / largura_px) * 1000.0
-        
-        hsv = cv2.cvtColor(img_focada, cv2.COLOR_BGR2HSV)
-        amostra_hsv = hsv[altura_px//4:3*altura_px//4, largura_px//4:3*largura_px//4]
-        tom_medio_h = np.mean(amostra_hsv[:, :, 0])
-        tom_medio_s = np.mean(amostra_hsv[:, :, 1])
-        
-        # SEGMENTAÇÃO ADAPTATIVA DE TONS DE AZUL (IAC)
-        if 15 <= tom_medio_h <= 45 and tom_medio_s > 60:
-            tipo_cartao = "Original (Amarelo)"
-            canal_analise = hsv[:, :, 1]
-            mascara = cv2.adaptiveThreshold(
-                canal_analise, 255, 
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY, 
-                101, sensibilidade_azul
-            )
-            mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
-        else:
-            tipo_cartao = "Revelado (Branco)"
-            canal_analise = hsv[:, :, 2]
-            mascara = cv2.adaptiveThreshold(
-                canal_analise, 255, 
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                cv2.THRESH_BINARY_INV, 
-                101, sensibilidade_azul
-            )
-        
-        contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        gotas_filtradas = [c for c in contornos if cv2.contourArea(c) > 3]
-        num_gotas = len(gotas_filtradas)
-        porcentagem_cobertura = (cv2.countNonZero(mascara) / area_total_pixels) * 100
-        densidade_gotas = num_gotas / area_cartao_cm2 if num_gotas > 0 else 0
-        
-        diametros_reais_um = []
-        volumes_reais_um3 = []
-        for c in gotas_filtradas:
-            area_px = cv2.contourArea(c)
-            diametro_mancha_um = (2.0 * np.sqrt(area_px / np.pi)) * um_por_pixel
-            diametro_real_um = diametro_mancha_um / fator_espalhamento
-            diametros_reais_um.append(diametro_real_um)
-            volumes_reais_um3.append((4.0 / 3.0) * np.pi * ((diametro_real_um / 2.0) ** 3))
-            
-        diametros_reais_um = np.array(diametros_reais_um)
-        volumes_reais_um3 = np.array(volumes_reais_um3)
-        
-        if num_gotas > 0:
-            idx = np.argsort(diametros_reais_um)
-            diametros_ord = diametros_reais_um[idx]
-            frac_acum = np.cumsum(volumes_reais_um3[idx]) / np.sum(volumes_reais_um3)
-            dv01 = float(np.interp(0.1, frac_acum, diametros_ord))
-            text_dv05 = float(np.interp(0.5, frac_acum, diametros_ord))
-            dv09 = float(np.interp(0.9, frac_acum, diametros_ord))
-            span = (dv09 - dv01) / text_dv05 if text_dv05 > 0 else 0
-            pequenas = np.sum(diametros_reais_um < 150) / num_gotas * 100
-            medias = np.sum((diametros_reais_um >= 150) & (diametros_reais_um <= 300)) / num_gotas * 100
-            grandes = np.sum(diametros_reais_um > 300) / num_gotas * 100
-        else:
-            dv01 = text_dv05 = dv09 = span = pequenas = medias = grandes = 0.0
-            
-        quad_h, quad_w = altura_px // 2, largura_px // 2
-        cont_q = [0, 0, 0, 0]
-        for c in gotas_filtradas:
-            M = cv2.moments(c)
-            if M["m00"] != 0:
-                cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
-                if cX < quad_w and cY < quad_h: cont_q[0] += 1
-                elif cX >= quad_w and cY < quad_h: cont_q[1] += 1
-                elif cX < quad_w and cY >= quad_h: cont_q[2] += 1
-                else: cont_q[3] += 1
-        cv_espacial = (np.std(cont_q) / np.mean(cont_q) * 100) if np.mean(cont_q) > 0 else 0.0
-        
-        classe_asabe_final = classificar_asabe(text_dv05)
-
-        salvar_analise_bd(nome_arquivo, tipo_cartao, round(porcentagem_cobertura, 2), num_gotas, round(densidade_gotas, 2), round(text_dv05, 1), round(span, 2), classe_asabe_final)
-
-        resultados_gerais.append({
-            "Nome do Arquivo": nome_arquivo, "Tipo Detectado": tipo_cartao, "Cobertura (%)": round(porcentagem_cobertura, 2),
-            "Nº de Gotas": num_gotas, "Densidade (gotas/cm²)": round(densidade_gotas, 2), "Dv0.1 (µm)": round(dv01, 1),
-            "Dv0.5 / DMV (µm)": round(text_dv05, 1), "Dv0.9 (µm)": round(dv09, 1), "Amplitude (SPAN)": round(span, 2),
-            "Gotas Pequenas (<150µm) %": round(pequenas, 1), "Gotas Médias (150-300µm) %": round(medias, 1), "Gotas Grandes (>300µm) %": round(grandes, 1),
-            "CV da Distribuição (%)": round(cv_espacial, 2)
-        })
-        dados_graficos[nome_arquivo] = {"diametros": diametros_reais_um, "classes": [pequenas, medias, grandes], "dmv": text_dv05}
-        
-        img_vis = img_focada.copy()
-        cv2.drawContours(img_vis, gotas_filtradas, -1, (0, 255, 0), 2)
-        imagens_processadas[nome_arquivo] = {"original": img_original, "analisada": cv2.cvtColor(img_vis, cv2.COLOR_BGR2RGB), "focada_bgr": img_vis}
-
-    df_geral = pd.DataFrame(resultados_gerais)
-
-    # --- DEFINIÇÃO DOS GRÁFICOS PLOTLY 3D ---
-    raio = dados_graficos[nome_arquivo]["dmv"] / 2.0
-    u = np.linspace(0, 2 * np.pi, 50)
-    
-    # 1. Gota em voo
-    v_sph = np.linspace(0, np.pi, 50)
-    xs, ys, zs = raio * np.outer(np.cos(u), np.sin(v_sph)), raio * np.outer(np.sin(u), np.sin(v_sph)), raio * np.outer(np.ones(np.size(u)), np.cos(v_sph))
-    fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale=[[0, '#a5d6a7'], [0.5, '#0099ff'], [1, '#0033aa']], showscale=False)])
-    fig_sph.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='cube'), height=450, margin=dict(l=0,r=0,b=0,t=10))
-
-    # 2. Gota impactada
-    v_imp = np.linspace(0, np.pi / 2, 50)
-    xi, yi, zi = (raio * fator_espalhamento) * np.outer(np.cos(u), np.sin(v_imp)), (raio * fator_espalhamento) * np.outer(np.sin(u), np.sin(v_imp)), (raio * 0.4) * np.outer(np.ones(np.size(u)), np.cos(v_imp))
-    tp = raio * fator_espalhamento * 1.5
-    Xp, Yp = np.meshgrid(np.linspace(-tp, tp, 10), np.linspace(-tp, tp, 10))
-    fig_imp = go.Figure()
-    fig_imp.add_trace(go.Surface(x=Xp, y=Yp, z=np.zeros_like(Xp), colorscale=[[0, '#2e7d32'], [1, '#1b5e20']], showscale=False, opacity=0.6))
-    fig_imp.add_trace(go.Surface(x=xi, y=yi, z=zi, colorscale=[[0, '#00e5ff'], [1, '#006064']], showscale=False))
-    fig_imp.update_layout(scene=dict(xaxis_title="um", yaxis_title="um", zaxis_title="um", aspectmode='manual', aspectratio=dict(x=1, y=1, z=0.4)), height=450, margin=dict(l=0,r=0,b=0,t=10))
-
-    with aba_upload:
+    # Exibição do Painel de Resultados de Dossel
+    if st.session_state["analise_concluida"]:
         st.write("---")
-        st.markdown("### 📊 Dashboard de Resultados de Campo (Padrão IAC)")
-        dados_amostra = df_geral.iloc[0]
-        
-        # TRIO DE DIÂMETROS + SPAN
-        c_v1, c_v2, c_v3, c_v4 = st.columns(4)
-        
-        with c_v1:
-            st.metric(
-                label="📉 Dv0.1 (Gotas Finas)", 
-                value=f"{dados_amostra['Dv0.1 (µm)']} µm",
-                help="10% do volume líquido pulverizado é composto por gotas menores que este diâmetro. Indicador de alta criticidade para potencial de DERIVA de calda."
-            )
-
-        with c_v2:
-            st.metric(
-                label="💧 Dv0.5 / DMV (Mediana)", 
-                value=f"{dados_amostra['Dv0.5 / DMV (µm)']} µm",
-                help="Diâmetro da Mediana Volumétrica. Indica que metade (50%) do volume total da calda aplicada é composto por gotas menores que este valor, e a outra metade por gotas maiores."
-            )
-
-        with c_v3:
-            st.metric(
-                label="📈 Dv0.9 (Gotas Grossas)", 
-                value=f"{dados_amostra['Dv0.9 (µm)']} µm",
-                help="90% do volume líquido pulverizado é composto por gotas menores que este tamanho. Indicador diretamente associado a riscos potenciais de ESCORRIMENTO no alvo."
-            )
-
-        with c_v4:
-            span_val = dados_amostra['Amplitude (SPAN)']
-            status_span = "🎯 Excelente" if span_val <= 1.0 else ("⚠️ Moderado" if span_val <= 1.4 else "🚨 Irregular")
+        c_voltar, c_tit_res = st.columns([1, 4])
+        with c_voltar:
+            if st.button("⬅️ Fazer Nova Análise", use_container_width=True):
+                st.session_state["analise_concluida"] = False
+                st.session_state["dados_analise"] = {}
+                st.rerun()
+        with c_tit_res:
+            st.markdown(f"### 📊 Resultados de Campo: **{st.session_state['cultura_selecionada']}**")
             
-            st.metric(
-                label="🎯 Amplitude Relativa (SPAN)", 
-                value=f"{span_val}",
-                delta=status_span,
-                delta_color="normal" if span_val <= 1.2 else "inverse",
-                help="Calculado por (Dv0.9 - Dv0.1) / Dv0.5. Avalia a homogeneidade estrutural do espectro de gotas. Quanto mais próximo de zero, mais uniforme é o tamanho das gotas geradas."
-            )
+        res_dados = st.session_state["dados_analise"]
+        lista_posicoes = [p for p in ["Topo", "Meio", "Baixeiro"] if p in res_dados]
+        
+        if lista_posicoes:
+            abas_profundidade = st.tabs([f"📍 Posicionamento: {pos}" for pos in lista_posicoes])
+            for idx, pos in enumerate(lista_posicoes):
+                with abas_profundidade[idx]:
+                    dados_pos = res_dados[pos]
+                    
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("💧 DMV (Mediana)", f"{dados_pos['dmv']} µm")
+                    c2.metric("🎯 Cobertura Superficial", f"{dados_pos['cobertura']} %")
+                    c3.metric("🔢 Densidade de Gotas", f"{dados_pos['densidade']} g/cm²")
+                    c4.metric("📈 Gotas Contadas", f"{dados_pos['total_gotas']} gotas")
+                    
+                    st.markdown("#### 🔬 Avaliação e Veredito Técnico")
+                    if st.session_state["cultura_selecionada"] == "Cana-de-Açúcar" and pos == "Baixeiro":
+                        if dados_pos['densidade'] < 40:
+                            st.error(f"❌ **Densidade Baixa:** A cobertura de {dados_pos['densidade']} gotas/cm² está insuficiente para o controle de ferrugem no baixeiro da cana. Meta sugerida pelo IAC: >40 gotas/cm².")
+                        else:
+                            st.success("🎯 **Excelente Penetração:** Densidade e cobertura adequadas para transpor a folhagem da cana-de-açúcar.")
+                    elif dados_pos['cobertura'] < 4.0:
+                        st.warning("⚠️ **Atenção:** Baixa penetração detectada. O dossel superior pode estar criando efeito guarda-chuva.")
+                    else:
+                        st.success("✅ **Conformidade Técnica:** Cobertura dentro dos parâmetros ideais de pulverização.")
+                        
+                    st.write("")
+                    st.image(dados_pos["img_analisada"], caption=f"Perímetros da Amostra - {pos}", use_container_width=True)
+        else:
+            st.info("Suba as imagens no botão inicial para renderizar os dados.")
 
-        # LINHA INFERIOR
-        st.write("")
-        c_op1, c_op2, c_op3 = st.columns(3)
-        c_op1.metric(label="🔢 Total de Gotas Contadas", value=int(dados_amostra['Nº de Gotas']))
-        c_op2.metric(label="📊 Densidade de Gotas", value=f"{dados_amostra['Densidade (gotas/cm²)']} g/cm²")
-        c_op3.metric(label="🎯 Cobertura Real do Alvo", value=f"{dados_amostra['Cobertura (%)']} %")
-
-        st.info(f"📋 **Classificação Técnica Internacional (ASABE S572):** O espectro da sua calda gerou gotas do tipo **{classe_asabe_final}**.")
-
-    with aba_graficos:
-        st.subheader("📊 Modelagem Espacial das Gotas")
-        if nome_arquivo in dados_graficos:
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.markdown("**Frequência de Tamanho das Gotas (Histograma)**")
-                counts, bins = np.histogram(dados_graficos[nome_arquivo]["diametros"], bins=15)
+# ------------------------------------------------------------------------------
+# 📊 ABA 2: GRÁFICOS E SIMULAÇÕES VOLUMÉTRICAS EM 3D
+# ------------------------------------------------------------------------------
+with aba_graficos:
+    st.subheader("📊 Análise de Homogeneidade e Projeções Espaciais")
+    
+    res_dados = st.session_state["dados_analise"]
+    if not res_dados:
+        st.warning("⚠️ Nenhum cartão processado no momento. Vá para a aba 'Captura e Resultados' e processe pelo menos uma amostra.")
+    else:
+        posicoes_disponiveis = list(res_dados.keys())
+        pos_sel = st.selectbox("Selecione a amostra para analisar os gráficos:", posicoes_disponiveis, key="pos_sel_graficos")
+        dados_pos = res_dados[pos_sel]
+        
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.markdown("**Frequência Real de Tamanho das Gotas (µm)**")
+            if len(dados_pos["diametros"]) > 0:
+                counts, bins = np.histogram(dados_pos["diametros"], bins=15)
                 st.bar_chart(pd.DataFrame({"Quantidade": counts}, index=bins[:-1].astype(int)))
-            with col_g2:
-                st.markdown("**Distribuição de Classes de Gotas (%)**")
-                st.bar_chart(pd.DataFrame({"Percentual (%)": dados_graficos[nome_arquivo]["classes"]}, index=['Pequenas', 'Médias', 'Grandes']))
+            else:
+                st.caption("Gotas insuficientes para gerar histograma.")
+                
+            st.markdown("**Distribuição de Classes de Gotas (%)**")
+            st.bar_chart(pd.DataFrame({"Percentual (%)": dados_pos["classes"]}, index=['Pequenas (<150µm)', 'Médias (150-300µm)', 'Grandes (>300µm)']))
             
-            st.write("---")
-            st.markdown("### 🛰️ Comparação Espacial Realística 3D (Efeito do Impacto)")
-            
-            col_3d_1, col_3d_2 = st.columns(1) if dispositivo_ajustado == "Celular" else st.columns(2)
-            with col_3d_1:
-                st.markdown("<h4 style='text-align: center; color: #0099ff;'>🛰️ 1. Gota em Voo Sustentado (Esfera)</h4>", unsafe_allow_html=True)
-                st.plotly_chart(fig_sph, use_container_width=True)
-            with col_3d_2:
-                st.markdown("<h4 style='text-align: center; color: #2e7d32;'>🎯 2. Deposição Hidrodinâmica no Alvo</h4>", unsafe_allow_html=True)
-                st.plotly_chart(fig_imp, use_container_width=True)
+        with col_g2:
+            st.markdown("**Distribuição Espacial em 3D (Gota Mediana em Voo)**")
+            raio_g = max(dados_pos["dmv"] / 2.0, 10.0)
+            u_p = np.linspace(0, 2 * np.pi, 25)
+            v_p = np.linspace(0, np.pi, 25)
+            xs = raio_g * np.outer(np.cos(u_p), np.sin(v_p))
+            ys = raio_g * np.outer(np.sin(u_p), np.sin(v_p))
+            zs = raio_g * np.outer(np.ones(np.size(u_p)), np.cos(v_p))
+            fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale="Blues", showscale=False)])
+            fig_sph.update_layout(scene=dict(aspectmode='cube'), height=300, margin=dict(l=0,r=0,b=0,t=0))
+            st.plotly_chart(fig_sph, use_container_width=True)
+            st.caption(f"Simulação baseada no DMV calculado ({dados_pos['dmv']} µm).")
 
-    # ==============================================================================
-    # 🔍 ABA DE INSPEÇÃO DE CARTÕES (LABORATÓRIO VISUAL AVANÇADO)
-    # ==============================================================================
-    with aba_inspecao:
-        st.subheader("🔍 Laboratório Computacional de Inspeção de Imagem")
-        st.markdown("Utilize os filtros abaixo para diagnosticar falhas operacionais, sobreposição de calda ou riscos de deriva.")
+# ------------------------------------------------------------------------------
+# 🔍 ABA 3: LABORATÓRIO DE INSPEÇÃO VISUAL AVANÇADA (WATERSHED E FILTROS)
+# ------------------------------------------------------------------------------
+with aba_inspecao:
+    st.subheader("🔬 Laboratório de Inspeção e Análise de Imagem")
+    st.markdown("Utilize esta aba para aplicar filtros matemáticos avançados no cartão processado.")
+    
+    res_dados = st.session_state["dados_analise"]
+    if not res_dados:
+        st.warning("⚠️ Nenhum cartão processado no momento. Vá para a aba 'Captura e Resultados' e processe uma amostra.")
+    else:
+        posicoes_disponiveis = list(res_dados.keys())
+        pos_sel = st.selectbox("Escolha a amostra para auditar:", posicoes_disponiveis, key="pos_sel_inspecao")
+        dados_pos = res_dados[pos_sel]
         
-        if nome_arquivo in imagens_processadas:
-            filtro_inspecao = st.selectbox(
-                "🔬 Escolha o Filtro de Diagnóstico Avançado:",
-                [
-                    "1. Visão Retificada (Correção de Perspectiva Homográfica)",
-                    "2. Mapa de Calor de Deposição (Uniformidade da Barra)",
-                    "3. Isolamento Estrito de Deriva (Gotas Críticas < 150µm)",
-                    "4. Alerta de Coalescência (Sobreposição e Escorrimento)"
-                ]
-            )
-            
-            col_i1, col_i2 = st.columns(1) if dispositivo_ajustado == "Celular" else st.columns(2)
-            
-            with col_i1:
-                st.image(imagens_processadas[nome_arquivo]["original"], caption="Foto Original Capturada no Campo", use_container_width=True)
-            
-            with col_i2:
-                if "1." in filtro_inspecao:
-                    st.image(imagens_processadas[nome_arquivo]["analisada"], caption=f"Cartão Planificado e Alinhado Geometricamente (Métrica Homográfica)", use_container_width=True)
-                    st.success("🎯 **Perspectiva Corrigida:** O robô identificou os vértices tridimensionais do cartão e 'esticou' a imagem para garantir que a amostragem matemática de diâmetro de gota seja idêntica em toda a extensão do papel.")
-
-                elif "2." in filtro_inspecao:
-                    blur_map = cv2.GaussianBlur(mascara, (45, 45), 0)
-                    heatmap = cv2.applyColorMap(blur_map, cv2.COLORMAP_JET)
-                    heatmap_rgb = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-                    st.image(heatmap_rgb, caption="Mapa Térmico de Deposição de Calda", use_container_width=True)
-
-                elif "3." in filtro_inspecao:
-                    img_deriva = np.zeros_like(img_focada)
-                    cont_deriva = 0
-                    for i, c in enumerate(gotas_filtradas):
-                        if diametros_reais_um[i] < 150.0:
-                            cv2.drawContours(img_deriva, [c], -1, (255, 0, 180), -1)
-                            cont_deriva += 1
-                    img_deriva_rgb = cv2.cvtColor(img_deriva, cv2.COLOR_BGR2RGB)
-                    st.image(img_deriva_rgb, caption="Filtro de Espectro Crítico de Deriva (Exclusivo Gotas < 150µm)", use_container_width=True)
-
-                elif "4." in filtro_inspecao:
-                    img_coalescencia = img_focada.copy()
-                    cont_coalescentes = 0
-                    for c in gotas_filtradas:
-                        area_p = cv2.contourArea(c)
-                        perimetro = cv2.arcLength(c, True)
-                        if perimetro > 0:
-                            circularidade = 4 * np.pi * (area_p / (perimetro ** 2))
-                            if circularidade < 0.55 and area_p > 150:
-                                cv2.drawContours(img_coalescencia, [c], -1, (0, 0, 255), 3)
-                                cont_coalescentes += 1
-                    img_coal_rgb = cv2.cvtColor(img_coalescencia, cv2.COLOR_BGR2RGB)
-                    st.image(img_coal_rgb, caption="Diagnóstico de Coalescência e Sobreposição de Impactos", use_container_width=True)
-
-    with aba_relatorio:
-        st.markdown("## 📋 Geração de Laudo Técnico")
-        dados_cartao = df_geral.iloc[0]
-        dmv_atual = dados_cartao["Dv0.5 / DMV (µm)"]
-        densidade_atual = dados_cartao["Densidade (gotas/cm²)"]
-        deriva_atual = dados_cartao["Gotas Pequenas (<150µm) %"]
-        span_atual = dados_cartao["Amplitude (SPAN)"]
+        filtro_selecionado = st.radio(
+            "🔬 Escolha o Filtro Diagnóstico Avançado:",
+            ["1. Visão de Campo", "2. Mapa Térmico de Deposição", "3. Watershed (Separação de Gotas)", "4. Isolamento Estrito de Deriva (<150µm)"],
+            key="filtro_inspecao_radio"
+        )
         
-        def gerar_pdf_laudo_grafico():
+        col_img_1, col_img_2 = st.columns(2)
+        
+        with col_img_1:
+            st.image(dados_pos["img_original"], caption="Amostra Original de Campo", use_container_width=True)
+            
+        with col_img_2:
+            if "1." in filtro_selecionado:
+                st.image(dados_pos["img_analisada"], caption="Detecção Convencional de Perímetro", use_container_width=True)
+                st.info("Gotas identificadas e circuladas em vermelho.")
+                
+            elif "2." in filtro_selecionado:
+                b_map = cv2.GaussianBlur(dados_pos["mascara"], (45, 45), 0)
+                h_map = cv2.cvtColor(cv2.applyColorMap(b_map, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+                st.image(h_map, caption="Mapa Térmico de Concentração de Calda", use_container_width=True)
+                st.warning("⚠️ **Diagnóstico:** Áreas vermelhas indicam acúmulos e risco de escorrimento. Áreas em azul representam falha.")
+                
+            elif "3." in filtro_selecionado:
+                dist_transform = cv2.distanceTransform(dados_pos["mascara"], cv2.DIST_L2, 5)
+                _, sure_fg = cv2.threshold(dist_transform, 0.3 * dist_transform.max(), 255, 0)
+                sure_fg = np.uint8(sure_fg)
+                
+                img_ws = cv2.cvtColor(dados_pos["focada"], cv2.COLOR_BGR2RGB)
+                img_ws[sure_fg == 255] = [0, 255, 0]
+                
+                st.image(img_ws, caption="Identificação de Núcleos (Watershed)", use_container_width=True)
+                st.info("💡 ** Watershed:** Este filtro localiza o pico central de cada mancha para separar gotas coladas.")
+                
+            elif "4." in filtro_selecionado:
+                img_deriva = np.zeros_like(dados_pos["focada"])
+                cont_deriva = 0
+                for i, c in enumerate(dados_pos["img_analisada"]):
+                    if i < len(dados_pos["diametros"]) and dados_pos["diametros"][i] < 150.0:
+                        cv2.drawContours(img_deriva, [c], -1, (255, 0, 180), -1)
+                        cont_deriva += 1
+                
+                st.image(cv2.cvtColor(img_deriva, cv2.COLOR_BGR2RGB), caption="Apenas Espectro de Risco de Deriva (<150µm)", use_container_width=True)
+                perc_deriva = (cont_deriva / dados_pos["total_gotas"] * 100) if dados_pos["total_gotas"] > 0 else 0
+                st.error(f"🚨 **Gotas Voláteis:** {cont_deriva} gotas sob risco direto de deriva ({perc_deriva:.1f}% do total).")
+
+# ------------------------------------------------------------------------------
+# 📋 ABA 4: RELATÓRIOS E HISTÓRICO LOCAL (SQLITE E PDF ESTÁVEIS)
+# ------------------------------------------------------------------------------
+with aba_relatorio:
+    st.subheader("📋 Geração de Laudo e Histórico de Atendimento")
+    st.markdown("Todas as leituras são armazenadas no banco de dados SQLite para auditoria.")
+    
+    res_dados = st.session_state.get("dados_analise", {})
+    if res_dados:
+        first_pos = list(res_dados.keys())[0]
+        dados_cartao = res_dados[first_pos]
+        
+        st.markdown("### 📊 Sumário Executivo do Ensaio Atual")
+        lista_pos_sum = list(res_dados.keys())
+        total_papeis = len(lista_pos_sum)
+        
+        media_cob = np.mean([res_dados[p]["cobertura"] for p in lista_pos_sum])
+        media_dens = np.mean([res_dados[p]["densidade"] for p in lista_pos_sum])
+        media_dmv = np.mean([res_dados[p]["dmv"] for p in lista_pos_sum])
+        
+        c_sum1, c_sum2, c_sum3, c_sum4 = st.columns(4)
+        c_sum1.metric("📋 Total de Papéis", f"{total_papeis} un")
+        c_sum2.metric("💧 DMV Médio", f"{media_dmv:.1f} µm")
+        c_sum3.metric("🎯 Cobertura Média", f"{media_cob:.2f} %")
+        c_sum4.metric("🔢 Densidade Média", f"{media_dens:.1f} g/cm²")
+        
+        def gerar_pdf_laudo_grafico(dados_ensaio, cultura_nome, clima_info):
             pdf = FPDF()
             pdf.add_page()
             pdf.set_margins(15, 15, 15)
             
             pdf.set_fill_color(26, 36, 43)
             pdf.rect(0, 0, 210, 42, 'F')
+            
+            pdf.set_y(12)
             pdf.set_font("Arial", "B", 14)
             pdf.set_text_color(255, 255, 255)
-            pdf.set_y(10)
-            pdf.cell(0, 8, "LAUDO DA QUALIDADE DE PULVERIZACAO INTERATIVA", ln=True, align="C")
+            pdf.cell(0, 8, "PROGRAMA APLIQUE BEM - LAUDO DE CONFORMIDADE TECNICA", ln=True, align="C")
+            pdf.set_font("Arial", "I", 9.5)
+            pdf.cell(0, 5, "Parceria Cientica: Instituto Agronomico (IAC)", ln=True, align="C")
             
-            if os.path.exists(CAMINHO_LOGO_IAC): pdf.image(CAMINHO_LOGO_IAC, x=15, y=47, w=22)
-            if os.path.exists(CAMINHO_LOGO_APLIQUEBEM): pdf.image(CAMINHO_LOGO_APLIQUEBEM, x=173, y=47, w=22)
-            
-            pdf.set_y(75)
+            pdf.set_y(48)
             pdf.set_text_color(40, 50, 60)
+            pdf.set_font("Arial", "B", 12)
+            pdf.cell(0, 8, f"Relatorio de Ensaio: {cultura_nome}", ln=True)
+            
+            pdf.ln(3)
+            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+            pdf.ln(4)
+            
             pdf.set_font("Arial", "B", 11)
-            pdf.cell(0, 6, "1. Condicoes Climatologicas da Estacao Local de Analise", ln=True)
+            pdf.cell(0, 6, "1. Condicoes Climatologicas Coletadas", ln=True)
+            pdf.ln(1)
             
-            pdf.set_y(122)
-            pdf.cell(0, 6, "2. Projecao Computacional 3D (Efeito Fator Espalhamento)", ln=True)
+            pdf.set_fill_color(245, 247, 248)
+            pdf.rect(15, pdf.get_y(), 180, 16, 'F')
+            pdf.set_font("Arial", "", 9.5)
             
-            # Rodapé simples
+            if clima_info:
+                texto_clima = (
+                    f"Localidade: {clima_info['local']}   |   Temperatura: {clima_info['temp']} C\n"
+                    f"Humidade Relativa (UR): {clima_info['uhr']}%   |   Velocidade do Vento: {clima_info['vento']} km/h"
+                )
+            else:
+                texto_clima = "Localidade informada: Campinas (Dados de satelite nao carregados)."
+                
+            pdf.multi_cell(180, 5.5, texto_clima, border=1)
+            pdf.ln(4)
+            
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 6, "2. Diagnostico Individual dos Cartoes Hidrossenseis", ln=True)
+            pdf.ln(2)
+            
+            pdf.set_fill_color(0, 80, 136)
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font("Arial", "B", 9)
+            
+            pdf.cell(30, 8, "Posicao", border=1, fill=True, align="C")
+            pdf.cell(30, 8, "DMV (Dv0.5)", border=1, fill=True, align="C")
+            pdf.cell(30, 8, "Cobertura (%)", border=1, fill=True, align="C")
+            pdf.cell(35, 8, "Densidade (g/cm2)", border=1, fill=True, align="C")
+            pdf.cell(20, 8, "SPAN", border=1, fill=True, align="C")
+            pdf.cell(35, 8, "Classe ASABE", border=1, fill=True, align="C")
+            pdf.ln()
+            
+            pdf.set_text_color(40, 50, 60)
+            pdf.set_font("Arial", "", 9)
+            
+            for pos, dados in dados_ensaio.items():
+                pdf.cell(30, 8, str(pos), border=1, align="C")
+                pdf.cell(30, 8, f"{dados['dmv']} um", border=1, align="C")
+                pdf.cell(30, 8, f"{dados['cobertura']}%", border=1, align="C")
+                pdf.cell(35, 8, f"{dados['densidade']}", border=1, align="C")
+                pdf.cell(20, 8, f"{dados['span']}", border=1, align="C")
+                pdf.cell(35, 8, str(dados['asabe']), border=1, align="C")
+                pdf.ln()
+                
+            pdf.ln(6)
             pdf.set_y(266)
             pdf.set_font("Arial", "I", 7.5)
             pdf.set_text_color(140, 140, 140)
             pdf.cell(0, 4, "Algoritmo Computacional de Calibracao Hidrossensivel IAC / Aplique Bem 2026.", ln=True, align="C")
-            return pdf.output(dest='S').encode('latin1')
+            return pdf.output(dest='S').encode('latin1', errors='replace')
 
-        pdf_bytes = gerar_pdf_laudo_grafico()
-        st.download_button(
-            label="🚀 GERAR LAUDO COMPLETO COM GRÁFICOS 3D E CLIMA (PDF)",
-            data=pdf_bytes,
-            file_name=f"Laudo_Completo_3D_{nome_arquivo.split('.')[0]}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-with aba_relatorio:
+        try:
+            pdf_bytes = gerar_pdf_laudo_grafico(res_dados, st.session_state["cultura_selecionada"], dados_clima)
+            st.download_button(
+                label="🚀 GERAR LAUDO COMPLETO DO DOSSEL (PDF)",
+                data=pdf_bytes,
+                file_name="Laudo_Tecnico_Dossel_IAC.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Erro ao compor o laudo em PDF: {e}")
+            
     st.write("---")
-    st.markdown("### 🗄️ Histórico Permanente de Análises")
-    conn = sqlite3.connect(DB_NAME)
-    df_historico = pd.read_sql_query("SELECT * FROM historico_analises ORDER BY id DESC", conn)
-    conn.close()
-    if not df_historico.empty:
-        st.dataframe(df_historico, use_container_width=True)
+    st.markdown("### 💾 Leituras Registradas no Banco de Dados Local")
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        df_h = pd.read_sql_query("SELECT id, data_hora, cultura, posicao, cobertura, densidade, dmv, span, classe_asabe FROM historico_analises ORDER BY id DESC LIMIT 20", conn)
+        conn.close()
+        
+        if not df_h.empty:
+            st.dataframe(df_h, use_container_width=True)
+            st.success("✅ Sincronização do banco de dados ativa e estável.")
+        else:
+            st.info("Nenhuma leitura arquivada no banco local.")
+    except Exception as e:
+        st.error(f"Erro ao aceder ao banco de dados local: {e}")
