@@ -151,7 +151,7 @@ if img_iac: st.sidebar.image(img_iac, width=100)
 if img_aplique: st.sidebar.image(img_aplique, width=120)
 st.sidebar.markdown("---")
 
-# Seletor de Modo de Tela manual (Crucial para forçar no Computador se o JS falhar!)
+# Seletor de Modo de Tela manual
 st.sidebar.header("📱 Modo de Visualização")
 opcao_dispositivo = st.sidebar.selectbox(
     "Visualização de Tela:", 
@@ -166,7 +166,7 @@ if dispositivo_ajustado == "Celular":
 else:
     st.sidebar.info("💻 Modo Computador Ativo")
 
-# Seletor de Tipo de Papel (Essencial para as diferentes calibrações)
+# Seletor de Tipo de Papel
 st.sidebar.header("📄 Matriz de Amostragem")
 tipo_papel_sel = st.sidebar.selectbox(
     "Papel Hidrossensível:",
@@ -178,7 +178,7 @@ st.sidebar.header("🔬 Calibração de Visão (IAC)")
 sensibilidade_azul = st.sidebar.slider(
     "Sensibilidade de Captura", 
     min_value=1, max_value=25, value=11, step=2,
-    help="Ajuste do filtro de segmentação de cor."
+    help="Ajuste fino para capturar gotas extremamente pequenas e finas."
 )
 fator_espalhamento = st.sidebar.slider("Fator de Espalhamento (Mancha/Real)", 1.0, 3.0, 2.0, 0.1)
 
@@ -212,7 +212,7 @@ st.write("---")
 if "analise_concluida" not in st.session_state:
     st.session_state["analise_concluida"] = False
 
-# Inicialização com valores padrão para EVITAR KeyError antes da primeira leitura!
+# Inicialização com valores padrão para EVITAR KeyError antes da primeira leitura
 if "dados_analise" not in st.session_state:
     st.session_state["dados_analise"] = {
         "cobertura": 0.0, "densidade": 0.0,
@@ -247,7 +247,7 @@ def ordenar_pontos(pts):
 # 🗺️ RENDERIZAÇÃO DAS 4 ABAS CLÁSSICAS DO SISTEMA
 # ==============================================================================
 aba_upload, aba_graficos, aba_inspecao, aba_relatorio = st.tabs([
-    "📥 Captura e Resultados", "📊 Espectro e Projeções 3D", "🔍 Inspeção de Gotas", "📋 Relatório de Impacto"
+    "📥 Captura e Resultados", "📊 Espectro de Tamanho", "🔍 Inspeção de Gotas", "📋 Relatório de Impacto"
 ])
 
 # ------------------------------------------------------------------------------
@@ -303,19 +303,22 @@ with aba_upload:
                 
             alt_px, larg_px = img_focada.shape[:2]
             area_tot_px = alt_px * larg_px
-            um_por_px = (30.0 / larg_px) * 1000.0 # Conversão Baseada em 30mm de largura padrão
+            um_por_px = (30.0 / larg_px) * 1000.0 # Baseado na largura de 30mm do cartão real
             
             # ==========================================================================
-            # 🔬 MOTOR DE CORES ADAPTATIVO (IMUNE A SOMBRAS E GRADIENTES DE LUZ)
+            # 🔬 MOTOR DE CORES CIELAB DE ALTA RESOLUÇÃO COM HISTOGRAMA ADAPTATIVO (CLAHE)
             # ==========================================================================
             if "Hidrossensível" in tipo_papel_sel:
-                # Converter para Lab para obter separação direta de amarelo vs azul no canal b*
+                # Converte para Lab para usar o canal b* (Amarelo vs Azul)
                 lab = cv2.cvtColor(img_focada, cv2.COLOR_BGR2Lab)
-                b_canal = lab[:, :, 2] # Canal b*: Amarelo alto, Azul muito baixo
-                b_suavizado = cv2.bilateralFilter(b_canal, 9, 50, 50)
+                b_canal = lab[:, :, 2]
                 
-                # Utilização de Limiar Adaptativo Local em vez de corte global de Otsu!
-                # Isso impede totalmente que sombras gerem contornos massivos indesejados.
+                # CLAHE: Equalização adaptativa local para destacar micro-partículas
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                b_equalizado = clahe.apply(b_canal)
+                b_suavizado = cv2.bilateralFilter(b_equalizado, 5, 50, 50)
+                
+                # Limiarização adaptativa Gaussiana focada em micro-píxeis
                 mascara = cv2.adaptiveThreshold(
                     b_suavizado, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                     cv2.THRESH_BINARY_INV, 101, sensibilidade_azul
@@ -323,23 +326,26 @@ with aba_upload:
             else:
                 # Cromecote (Branco + Corante Azul/Escuro)
                 gray_c = cv2.cvtColor(img_focada, cv2.COLOR_BGR2GRAY)
-                gray_suavizado = cv2.bilateralFilter(gray_c, 9, 50, 50)
                 
-                # Inversão adaptativa local de tons escuros em fundo claro
+                # Aplicação de CLAHE para destacar corantes suaves no papel brilhante
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                gray_equalizado = clahe.apply(gray_c)
+                gray_suavizado = cv2.bilateralFilter(gray_equalizado, 5, 50, 50)
+                
                 mascara = cv2.adaptiveThreshold(
                     gray_suavizado, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                     cv2.THRESH_BINARY_INV, 101, sensibilidade_azul
                 )
             
-            # Limpeza morfológica fina para poeiras e ruído eletrónico
-            kernel_limpeza = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            # Limpeza cirúrgica de pequenos ruídos de pixel único
+            kernel_limpeza = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
             mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel_limpeza)
             
             contornos, _ = cv2.findContours(mascara, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            gotas = [c for c in contornos if cv2.contourArea(c) > 2]
+            gotas = [c for c in contornos if cv2.contourArea(c) > 1] # Sensibilidade mínima de contagem (gotas minúsculas)
             
             cob = (cv2.countNonZero(mascara) / area_tot_px) * 100
-            dens = len(gotas) / 24.0 # 24 cm² é a área do cartão físico padrão (3x8cm)
+            dens = len(gotas) / 24.0 # Baseado no cartão padrão de 24 cm²
             
             diametros = []
             volumes = []
@@ -382,7 +388,7 @@ with aba_upload:
             salvar_analise_bd(tipo_papel_sel, round(cob, 2), round(dens, 2), round(dv01, 1), round(dmv, 1), round(dv09, 1), round(span, 2), len(gotas), classificar_asabe(dmv))
             st.rerun()
 
-    # Painel de Métricas Consolidado do Cartão (Renderiza de forma estável)
+    # Painel de Métricas Consolidado do Cartão (Renderização estável)
     dados = st.session_state["dados_analise"]
     
     st.write("---")
@@ -411,7 +417,7 @@ with aba_upload:
         col_img_a.image(dados["img_analisada"], caption="Gotas Isoladas e Contadas", use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# 📊 ABA 2: GRÁFICOS E SIMULAÇÕES VOLUMÉTRICAS EM 3D
+# 📊 ABA 2: GRÁFICOS E DISTRIBUIÇÃO DE ESPECTRO
 # ------------------------------------------------------------------------------
 with aba_graficos:
     st.subheader("📊 Distribuição de Espectro Volumétrico")
@@ -427,34 +433,28 @@ with aba_graficos:
         else:
             st.caption("Efetue uma leitura para gerar o histograma de diâmetros.")
             
+    with col_g2:
         st.markdown("**Classes de Gotas em Relação ao Alvo (%)**")
         st.bar_chart(pd.DataFrame({"Percentual (%)": dados["classes"]}, index=['Pequenas (<150µm)', 'Médias (150-300µm)', 'Grandes (>300µm)']))
-        
-    with col_g2:
-        st.markdown("**Modelação Tridimensional da Gota Mediana (Voo)**")
-        raio_g = max(dados["dmv"] / 2.0, 10.0)
-        u_p = np.linspace(0, 2 * np.pi, 25)
-        v_p = np.linspace(0, np.pi, 25)
-        xs = raio_g * np.outer(np.cos(u_p), np.sin(v_p))
-        ys = raio_g * np.outer(np.sin(u_p), np.sin(v_p))
-        zs = raio_g * np.outer(np.ones(np.size(u_p)), np.cos(v_p))
-        fig_sph = go.Figure(data=[go.Surface(x=xs, y=ys, z=zs, colorscale="Blues", showscale=False)])
-        fig_sph.update_layout(scene=dict(aspectmode='cube'), height=350, margin=dict(l=0,r=0,b=0,t=0))
-        st.plotly_chart(fig_sph, use_container_width=True)
-        st.caption(f"Simulação espacial baseada no DMV calculado ({dados['dmv']} µm).")
 
 # ------------------------------------------------------------------------------
-# 🔍 ABA 3: LABORATÓRIO DE INSPEÇÃO VISUAL AVANÇADA
+# 🔍 ABA 3: LABORATÓRIO DE INSPEÇÃO VISUAL AVANÇADA (COM MODO RAIO-X)
 # ------------------------------------------------------------------------------
 with aba_inspecao:
     st.subheader("🔍 Laboratório Diagnóstico de Calda")
-    st.markdown("Aplique filtros de visão artificial para auditar e analisar o comportamento da deposição.")
+    st.markdown("Aplique filtros de visão artificial avançados para auditar as leituras, focando na micro-precisão.")
     
     dados = st.session_state["dados_analise"]
     
     filtro_sel = st.radio(
         "🔬 Escolha o Filtro Óptico:",
-        ["1. Visão de Campo Corrigida", "2. Mapa Térmico de Deposição", "3. Watershed (Detecção de Núcleos)", "4. Alerta de Gotas de Deriva (<150µm)"],
+        [
+            "1. Visão de Campo Corrigida", 
+            "2. Mapa Térmico de Deposição", 
+            "3. Watershed (Detecção de Núcleos)", 
+            "4. Alerta de Gotas de Deriva (<150µm)",
+            "5. Modo Diagnóstico Raio-X 🛰️ (Filtro Micro-Gotas)"
+        ],
         horizontal=True
     )
     
@@ -489,6 +489,47 @@ with aba_inspecao:
                     if i < len(dados["diametros"]) and dados["diametros"][i] < 150.0:
                         cv2.drawContours(img_deriva, [c], -1, (255, 0, 150), -1)
                 st.image(cv2.cvtColor(img_deriva, cv2.COLOR_BGR2RGB), caption="Espectro Sensível a Evaporação/Deriva", use_container_width=True)
+            elif "5." in filtro_sel:
+                # ==============================================================================
+                # 🛰️ MOTOR CIENTÍFICO "RAIO-X" PARA MICRO-PARTÍCULAS
+                # ==============================================================================
+                # Converte para cinza de alta resolução
+                img_gray = cv2.cvtColor(dados["focada"], cv2.COLOR_BGR2GRAY)
+                # Inversão para obter efeito negativo médico
+                img_inv = cv2.bitwise_not(img_gray)
+                # Aplicação de mapa de cor científico (BONE)
+                xray = cv2.applyColorMap(img_inv, cv2.COLORMAP_BONE)
+                xray_rgb = cv2.cvtColor(xray, cv2.COLOR_BGR2RGB)
+                
+                # Identifica gotas e anota tamanhos individuais nas micropartículas
+                contornos_temp, _ = cv2.findContours(dados["mascara"], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                desenho_rx = xray_rgb.copy()
+                
+                # Filtra e anota um subgrupo de gotas para não poluir visualmente a tela
+                cont_anotadas = 0
+                for i, c in enumerate(contornos_temp):
+                    if i < len(dados["diametros"]):
+                        diam = dados["diametros"][i]
+                        # Destaca de forma fluorescente
+                        cor_neon = (0, 245, 255) if diam < 150 else (0, 255, 0)
+                        cv2.drawContours(desenho_rx, [c], -1, cor_neon, 2)
+                        
+                        # Escreve o diâmetro ao lado de gotas menores que 150 µm de forma intercalada
+                        if diam < 150 and cont_anotadas < 12 and i % 5 == 0:
+                            M = cv2.moments(c)
+                            if M["m00"] != 0:
+                                cX = int(M["m10"] / M["m00"])
+                                cY = int(M["m01"] / M["m00"])
+                                # Desenha linha e texto fluorescente
+                                cv2.putText(
+                                    desenho_rx, f"{int(diam)} um", (cX + 12, cY - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 245, 255), 1, cv2.LINE_AA
+                                )
+                                cv2.circle(desenho_rx, (cX, cY), 2, (0, 245, 255), -1)
+                                cont_anotadas += 1
+                
+                st.image(desenho_rx, caption="🛰️ Processamento de Alto Contraste (Gotas Brilhantes)", use_container_width=True)
+                st.success("🛰️ **Modo Raio-X Ativo:** A inversão de luminância isola sombras e destaca micropartículas sob forte contraste metálico. Ideal para auditorias microscópicas.")
         else:
             st.info("Aguardando processamento de imagem.")
 
