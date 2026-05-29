@@ -103,7 +103,7 @@ img_aplique = carregar_logo(CAMINHO_LOGO_APLIQUEBEM)
 # 🔐 ACESSO RESTRITO
 # ==============================================================================
 USUARIOS_AUTORIZADOS = {
-    "andre": "iaciac", "manoel": "iaciac", "hamilton": "iaciac", "iac": "apliquebem2026"
+    "andre": "iaciac", "manoel": "iaciac", "hamilton": "iaciac", "iac": "apliquebem2026", "Viviane": "iaciac", "monique": "iaciac"
 }
 
 if "autenticado" not in st.session_state:
